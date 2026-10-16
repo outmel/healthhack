@@ -1,9 +1,47 @@
 @import "tailwindcss";
 
+/* Warm, calm palette for caregivers: cream background, deep teal for actions,
+   amber for "worth watching", coral only for emergencies. */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-nunito);
+
+  --color-cream: #fbf7f1;
+  --color-paper: #ffffff;
+  --color-line: #ece4d8;
+  --color-ink: #1f2a2e;
+  --color-muted: #5f6b6e;
+  --color-faint: #8b9497;
+
+  --color-brand: #0e6b63;
+  --color-brand-dark: #0a524c;
+  --color-brand-soft: #e2f1ed;
+
+  --color-sun: #b86e00;
+  --color-sun-soft: #fff3dc;
+  --color-sun-line: #f3cf8f;
+
+  --color-coral: #c8442a;
+  --color-coral-soft: #fdebe5;
+
+  --color-sage: #3d7a3a;
+  --color-sage-soft: #e9f3e3;
+
+  --color-lilac-soft: #f1ecf8;
+}
+
+html {
+  font-size: 17px;
 }
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-nunito), system-ui, sans-serif;
+}
+
+/* Visible keyboard focus everywhere. */
+:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 12px;
 }

@@ -1,5 +1,6 @@
 // Helper-facing strings. Lane 4 owns the translations; keep keys identical across languages.
 export const LANGS = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" } as const;
+export const LANG_SHORT: Record<keyof typeof LANGS, string> = { id: "Bahasa", tl: "Tagalog", en: "English" };
 export type Lang = keyof typeof LANGS;
 export const SPEECH_LOCALE: Record<Lang, string> = { id: "id-ID", tl: "fil-PH", en: "en-SG" };
 
@@ -36,6 +37,19 @@ const en = {
   notDiagnosis: "Teman notices changes. It does not diagnose.",
   working: "Working…",
   failed: "Something went wrong. Try again.",
+  todayTitle: "Today",
+  progress: "{n} of 3 done",
+  doneToday: "Done today",
+  tipTitle: "A note from Teman",
+  andYou: "And you, {name}?",
+  moodWords: ["Very hard", "Hard", "Okay", "Good", "Great"],
+  thanksCheckin: "Thank you. Take care of yourself too.",
+  stepBefore: "Photo before eating",
+  stepAfter: "Photo after eating",
+  standIntro: "Ask her to sit with arms crossed, then stand up 5 times. Press Start, and tap the big button each time she stands.",
+  stayClose: "Stay close to her so she is safe.",
+  voiceIntro: "Tell Teman what you noticed today. You can speak in your own language.",
+  allDone: "All done for today. Thank you!",
 };
 export type Dict = typeof en;
 
@@ -72,6 +86,19 @@ const id: Dict = {
   notDiagnosis: "Teman memperhatikan perubahan. Teman tidak mendiagnosis.",
   working: "Sedang diproses…",
   failed: "Ada masalah. Coba lagi.",
+  todayTitle: "Hari ini",
+  progress: "{n} dari 3 selesai",
+  doneToday: "Sudah hari ini",
+  tipTitle: "Pesan dari Teman",
+  andYou: "Dan kamu, {name}?",
+  moodWords: ["Sangat berat", "Berat", "Biasa", "Baik", "Sangat baik"],
+  thanksCheckin: "Terima kasih. Jaga dirimu juga ya.",
+  stepBefore: "Foto sebelum makan",
+  stepAfter: "Foto sesudah makan",
+  standIntro: "Minta Ibu duduk dengan tangan disilang di dada, lalu berdiri 5 kali. Tekan Mulai, lalu ketuk tombol besar setiap kali Ibu berdiri.",
+  stayClose: "Tetap di dekat Ibu agar aman.",
+  voiceIntro: "Ceritakan apa yang kamu lihat hari ini. Boleh pakai bahasamu sendiri.",
+  allDone: "Semua selesai hari ini. Terima kasih!",
 };
 
 const tl: Dict = {
@@ -107,6 +134,19 @@ const tl: Dict = {
   notDiagnosis: "Napapansin ng Teman ang mga pagbabago. Hindi ito nagdi-diagnose.",
   working: "Pinoproseso…",
   failed: "May problema. Subukan ulit.",
+  todayTitle: "Ngayong araw",
+  progress: "{n} sa 3 tapos na",
+  doneToday: "Tapos na ngayon",
+  tipTitle: "Mensahe mula sa Teman",
+  andYou: "Ikaw naman, {name}?",
+  moodWords: ["Napakahirap", "Mahirap", "Okay lang", "Mabuti", "Napakabuti"],
+  thanksCheckin: "Salamat. Alagaan mo rin ang sarili mo.",
+  stepBefore: "Litrato bago kumain",
+  stepAfter: "Litrato pagkatapos kumain",
+  standIntro: "Paupuin siya nang nakakrus ang braso sa dibdib, at patayuin nang 5 beses. Pindutin ang Simulan, at i-tap ang malaking button tuwing tatayo siya.",
+  stayClose: "Manatiling malapit sa kanya para ligtas.",
+  voiceIntro: "Sabihin sa Teman ang napansin mo ngayon. Puwede kang magsalita sa sarili mong wika.",
+  allDone: "Tapos na lahat ngayong araw. Salamat!",
 };
 
 export const DICTS: Record<Lang, Dict> = { en, id, tl };

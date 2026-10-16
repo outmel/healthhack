@@ -1,14 +1,17 @@
 "use client";
 
+import { LogOut } from "./icons";
+
 export default function LogoutButton({ label = "Log out" }: { label?: string }) {
   return (
     <button
-      className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm text-stone-600"
+      className="flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-2 text-sm font-semibold text-muted hover:text-ink"
       onClick={async () => {
         await fetch("/api/login", { method: "DELETE" });
-        window.location.href = "/login";
+        window.location.assign("/login");
       }}
     >
+      <LogOut className="h-4 w-4" />
       {label}
     </button>
   );

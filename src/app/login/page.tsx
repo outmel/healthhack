@@ -1,64 +1,93 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronRight, Heart, Logo, Stethoscope, Users } from "@/components/icons";
 
-const DEMO = [
-  { email: "siti@teman.demo", label: "Siti", role: "Helper" },
-  { email: "rachel@teman.demo", label: "Rachel", role: "Family" },
-  { email: "drlim@teman.demo", label: "Dr Lim", role: "GP" },
+const DEMO_PASSWORD = "teman2026";
+
+const ROLES = [
+  { email: "siti@teman.demo", who: "Siti", title: "I'm the helper", desc: "Log meals, a quick stand test and voice notes", Icon: Heart, tint: "bg-brand-soft text-brand" },
+  { email: "rachel@teman.demo", who: "Rachel", title: "I'm family", desc: "See how Mum is doing this week", Icon: Users, tint: "bg-sun-soft text-sun" },
+  { email: "drlim@teman.demo", who: "Dr Lim", title: "I'm the doctor", desc: "Trends, notes and a summary for the visit", Icon: Stethoscope, tint: "bg-lilac-soft text-[#6b4fa0]" },
 ];
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   async function login(e: string, p: string) {
-    setBusy(true);
+    setBusy(e);
     setError("");
     const res = await fetch("/api/login", { method: "POST", body: JSON.stringify({ email: e, password: p }) });
     const data = await res.json().catch(() => ({}));
-    if (res.ok) window.location.href = data.redirect;
+    if (res.ok) window.location.assign(data.redirect);
     else {
-      setError(data.error ?? "Login failed");
-      setBusy(false);
+      setError(data.error ?? "That didn't work. Please try again.");
+      setBusy(null);
     }
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 p-6">
-      <div>
-        <h1 className="text-4xl font-bold text-teal-700">Teman</h1>
-        <p className="mt-1 text-stone-600">The helper sees it first. Teman makes sure everyone else sees it too.</p>
-      </div>
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-8 px-4 py-10">
+      <header className="flex flex-col items-center gap-3 text-center">
+        <Logo className="h-14 w-14" />
+        <h1 className="text-4xl font-extrabold tracking-tight text-brand-dark">Teman</h1>
+        <p className="max-w-xs text-lg text-muted">
+          The helper sees it first. Teman makes sure everyone else sees it too.
+        </p>
+      </header>
 
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          login(email, password);
-        }}
-      >
-        <input className="rounded-xl border border-stone-300 p-3" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input className="rounded-xl border border-stone-300 p-3" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        {error && <p className="text-sm text-red-700">{error}</p>}
-        <button disabled={busy} className="rounded-xl bg-teal-700 p-3 font-semibold text-white disabled:opacity-50">
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+      <section aria-labelledby="who" className="flex flex-col gap-3">
+        <h2 id="who" className="text-center text-sm font-bold uppercase tracking-wider text-faint">Who are you?</h2>
+        {ROLES.map(({ email: e, who, title, desc, Icon, tint }) => (
+          <button
+            key={e}
+            disabled={!!busy}
+            onClick={() => login(e, DEMO_PASSWORD)}
+            className="flex min-h-20 items-center gap-4 rounded-3xl border border-line bg-paper p-4 text-left shadow-sm transition hover:border-brand/40 hover:shadow-md active:scale-[0.99] disabled:opacity-60"
+          >
+            <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${tint}`}>
+              <Icon className="h-7 w-7" />
+            </span>
+            <span className="flex-1">
+              <span className="block text-lg font-bold">{title}</span>
+              <span className="block text-muted">{busy === e ? "Opening…" : `${desc} · ${who}`}</span>
+            </span>
+            <ChevronRight className="h-5 w-5 text-faint" />
+          </button>
+        ))}
+        {error && !email && <p className="text-center text-coral">{error}</p>}
+      </section>
 
-      <div>
-        <p className="mb-2 text-sm text-stone-500">Demo accounts (password: teman2026)</p>
-        <div className="grid grid-cols-3 gap-2">
-          {DEMO.map((d) => (
-            <button key={d.email} disabled={busy} onClick={() => login(d.email, "teman2026")} className="rounded-xl border border-stone-300 bg-white p-3 text-left disabled:opacity-50">
-              <div className="font-semibold">{d.label}</div>
-              <div className="text-xs text-stone-500">{d.role}</div>
-            </button>
-          ))}
-        </div>
-      </div>
+      <details className="rounded-3xl border border-line bg-paper p-4">
+        <summary className="cursor-pointer font-semibold text-muted">Sign in with email instead</summary>
+        <form
+          className="mt-4 flex flex-col gap-3"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            login(email, password);
+          }}
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold">Email</span>
+            <input className="rounded-2xl border border-line bg-cream p-3" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold">Password</span>
+            <input className="rounded-2xl border border-line bg-cream p-3" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </label>
+          {error && email && <p className="text-coral">{error}</p>}
+          <button disabled={!!busy} className="rounded-2xl bg-brand p-3 text-lg font-bold text-white hover:bg-brand-dark disabled:opacity-60">
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </details>
+
+      <p className="text-center text-sm text-faint">
+        Demo with made-up data. Teman notices changes; it doesn&apos;t diagnose. Emergency? Call <strong className="text-coral">995</strong>.
+      </p>
     </main>
   );
 }

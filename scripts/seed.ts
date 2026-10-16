@@ -87,10 +87,10 @@ async function main() {
       );
     }
 
-    // Carer check-in every evening.
+    // Carer check-in every evening. Today's is left for the live demo.
     const rested = d < NO_REST_FROM && d % 7 === 0;
     const mood = d < NO_REST_FROM ? 4 : d < 20 ? 3 : 2 + Math.round(rand());
-    await db.query(
+    if (!isToday) await db.query(
       `INSERT INTO carer_checkins (helper_id, mood, rested_today, created_at) VALUES ($1, $2, $3, $4)`,
       [sitiId, mood, rested, at(d, 21)],
     );

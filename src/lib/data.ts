@@ -78,3 +78,17 @@ export async function getLatestAnalysis(seniorId: number): Promise<Analysis | nu
   );
   return row?.result ?? null;
 }
+
+/** Which of the helper's daily actions are already done today (Singapore date). */
+export async function getToday(seniorId: number, helperId: number) {
+  const rows = await query<{ type: string }>(
+    `SELECT DISTINCT type FROM observations
+      WHERE senior_id = $1 AND (created_at AT TIME ZONE 'Asia/Singapore')::date = (now() AT TIME ZONE 'Asia/Singapore')::date
+     UNION
+     SELECT 'checkin' FROM carer_checkins
+      WHERE helper_id = $2 AND (created_at AT TIME ZONE 'Asia/Singapore')::date = (now() AT TIME ZONE 'Asia/Singapore')::date`,
+    [seniorId, helperId],
+  );
+  const has = (t: string) => rows.some((r) => r.type === t);
+  return { meal: has("meal"), stand: has("mobility"), voice: has("voice"), checkin: has("checkin") };
+}
