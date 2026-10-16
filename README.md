@@ -42,3 +42,23 @@ Mdm Tan, 82, mild hypertension. Days 1–20 are stable (eats 75–90%, chair-sta
 ## Deploy
 
 Railway project `teman`: services `web` (this app) and `Postgres`. `web` has `DATABASE_URL=${{Postgres.DATABASE_URL}}` and a generated `SESSION_SECRET`; `DEEPSEEK_API_KEY` must be set by hand. Deploy with `railway up -s web`.
+
+## AI trend analysis (n8n)
+
+The GP page's **Analyse with AI** button calls `/api/analyse`, which calls an n8n workflow (`n8n/teman-analysis-workflow.json`) on Railway's private network:
+
+Webhook → Get patient data (SQL) → Compute baseline stats (code, same rule as `src/lib/baseline.ts`) → DeepSeek analysis → Parse and check → Save to `ai_analyses` → Respond.
+
+The model only explains the numbers; it never computes them. Two safety nets live in code: a combined meal + mobility flag can't be downgraded to "routine", and red-flag words in notes (fall, chest pain, breathlessness, confusion, slurred speech, fainting, hard to wake, in English, Bahasa Indonesia and Tagalog) force "urgent" with 995 advice. The latest saved result shows instantly on the GP, family and helper views, so judging never waits on a live call.
+
+To change the workflow, edit `n8n/build-workflow.mjs` and run `node n8n/build-workflow.mjs`.
+
+### One-time n8n setup
+
+1. Open the n8n service's URL and create the owner account.
+2. Import `n8n/teman-analysis-workflow.json` (Workflows → Import from file).
+3. Create three credentials and select them in the nodes that show a warning:
+   - **Teman Postgres** (Postgres): host `postgres.railway.internal`, port `5432`, database `railway`, user `postgres`, password = `PGPASSWORD` from the Railway Postgres service. SSL off.
+   - **DeepSeek API key** (Header Auth): name `Authorization`, value `Bearer <your DeepSeek key>`.
+   - **Teman webhook secret** (Header Auth): name `x-teman-secret`, value = `N8N_WEBHOOK_SECRET` from the Railway `web` service.
+4. Activate the workflow (production webhooks only run when it's active).

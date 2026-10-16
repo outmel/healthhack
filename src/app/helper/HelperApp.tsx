@@ -7,7 +7,9 @@ import LogoutButton from "@/components/LogoutButton";
 
 type Screen = "home" | "meal" | "stand" | "voice";
 
-export default function HelperApp({ name, seniorName, initialLang }: { name: string; seniorName: string; initialLang: Lang }) {
+type Tip = { text: string; en: string } | null;
+
+export default function HelperApp({ name, seniorName, initialLang, tip }: { name: string; seniorName: string; initialLang: Lang; tip: Tip }) {
   const [lang, setLang] = useState<Lang>(initialLang in DICTS ? initialLang : "id");
   const [screen, setScreen] = useState<Screen>("home");
   const t = DICTS[lang];
@@ -27,6 +29,8 @@ export default function HelperApp({ name, seniorName, initialLang }: { name: str
 
       {screen === "home" && (
         <>
+          {/* Written by the AI analysis in Siti's own language; English when she switches to English. */}
+          {tip && <p className="rounded-2xl bg-amber-50 p-4 text-lg ring-1 ring-amber-200">💡 {lang === "en" && tip.en ? tip.en : tip.text}</p>}
           <BigButton emoji="🍽️" label={t.meal} hint={t.mealHint} onClick={() => setScreen("meal")} />
           <BigButton emoji="🪑" label={t.stand} hint={t.standHint} onClick={() => setScreen("stand")} />
           <BigButton emoji="🎙️" label={t.voice} hint={t.voiceHint} onClick={() => setScreen("voice")} />

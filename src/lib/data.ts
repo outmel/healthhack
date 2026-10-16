@@ -52,3 +52,29 @@ export async function getCarerStatus(household: number) {
     needsNudge: daysWithoutRest >= 14 || (row.avg_mood ?? 5) <= 2.5,
   };
 }
+
+/** Shape saved by the n8n workflow's "Parse and check" node. */
+export type Analysis = {
+  urgency: "routine" | "review_soon" | "urgent";
+  generated_at: string;
+  analysis: {
+    headline?: string;
+    gp_summary?: string;
+    symptom_tags?: { tag: string; count: number; dates: string[] }[];
+    worth_reviewing?: string[];
+    red_flags?: string[];
+    family_message?: string;
+    helper_message?: string;
+    helper_message_en?: string;
+    carer_wellbeing?: string;
+    parse_error?: boolean;
+  };
+};
+
+export async function getLatestAnalysis(seniorId: number): Promise<Analysis | null> {
+  const [row] = await query<{ result: Analysis }>(
+    `SELECT result FROM ai_analyses WHERE senior_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [seniorId],
+  );
+  return row?.result ?? null;
+}

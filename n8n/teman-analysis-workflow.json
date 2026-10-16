@@ -1,0 +1,215 @@
+{
+  "name": "Teman – patient trend analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "teman-analyse",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "05598343-c3a9-402a-876a-e063b65c1f87",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Teman webhook secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT json_build_object(\n  'senior', (SELECT row_to_json(s) FROM seniors s WHERE s.id = $1),\n  'meals', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'meal' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) m),\n  'mobility', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) t),\n  'notes', (\n    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'original', original_text, 'translated', translated_text) ORDER BY created_at DESC)\n    FROM observations\n    WHERE senior_id = $1 AND type = 'voice' AND created_at > now() - interval '35 days'),\n  'carer', (\n    SELECT json_agg(json_build_object('date', (c.created_at AT TIME ZONE 'Asia/Singapore')::date, 'helper', u.name, 'language', u.language, 'mood', c.mood, 'rested_today', c.rested_today, 'note', c.note) ORDER BY c.created_at)\n    FROM carer_checkins c JOIN users u ON u.id = c.helper_id\n    WHERE u.household_id = (SELECT household_id FROM seniors WHERE id = $1)\n      AND c.created_at > now() - interval '35 days')\n) AS data;",
+        "options": {
+          "queryReplacement": "={{ $json.body.senior_id }}"
+        }
+      },
+      "id": "cb6ea61f-7b4d-4b4f-be0d-91a97a247b36",
+      "name": "Get patient data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Teman Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic stats: the AI explains the numbers, it never computes them.\n// Same rule as the app (src/lib/baseline.ts): 14-day baseline lagged 7 days, 3-day recent mean, flag at 1.5 SD.\nconst d = $input.first().json.data || {};\nconst seniorId = Number($('Webhook').first().json.body.senior_id);\nconst WINDOW = 14, RECENT = 3, LAG = 7, Z = 1.5;\nconst MIN_SD = { lower: 4, higher: 0.6 }; // meal %, chair-stand seconds\n\nfunction analyse(series, worseIs) {\n  const pts = (series || []).map(p => ({ date: p.date, v: Number(p.value) }));\n  if (pts.length < RECENT + 5) return { enough_data: false, days: pts.length };\n  const recent = pts.slice(-RECENT);\n  const end = pts.length - LAG;\n  const base = pts.slice(Math.max(0, end - WINDOW), end);\n  if (base.length < 5) return { enough_data: false, days: pts.length };\n  const mean = a => a.reduce((s, p) => s + p.v, 0) / a.length;\n  const bMean = mean(base);\n  const sd = Math.max(Math.sqrt(base.reduce((s, p) => s + (p.v - bMean) ** 2, 0) / Math.max(1, base.length - 1)), MIN_SD[worseIs]);\n  const rMean = mean(recent);\n  const z = (rMean - bMean) / sd;\n  const worse = worseIs === 'lower' ? z < -Z : z > Z;\n  // Onset: walk back from the latest day while each day is at least 1 SD in the worse direction.\n  let onset = null;\n  for (let i = pts.length - 1; i >= 0; i--) {\n    const dz = (pts[i].v - bMean) / sd;\n    if (!(worseIs === 'lower' ? dz < -1 : dz > 1)) break;\n    onset = pts[i].date;\n  }\n  return {\n    enough_data: true,\n    baseline_mean: +bMean.toFixed(1),\n    baseline_sd: +sd.toFixed(1),\n    recent_3day_mean: +rMean.toFixed(1),\n    change: +(rMean - bMean).toFixed(1),\n    z_score: +z.toFixed(2),\n    flagged: worse,\n    drift_started: onset,\n  };\n}\n\nconst meal = analyse(d.meals, 'lower');\nconst mobility = analyse(d.mobility, 'higher');\n\n// Red flags are matched in code too (English, Bahasa Indonesia, Tagalog), so urgency\n// never depends only on the model noticing them.\nconst RED_FLAGS = {\n  fall: /\\b(fell|fall(en)?|jatuh|nahulog|natumba)\\b/i,\n  'chest pain': /chest pain|nyeri dada|sakit dada|sakit sa dibdib/i,\n  breathlessness: /breathless|short(ness)? of breath|sesak( napas)?|hirap huminga/i,\n  'sudden confusion': /confus|bingung|linglong|nalilito/i,\n  'slurred speech': /slurred|pelo|bicara tidak jelas|utal/i,\n  fainting: /faint|pingsan|nawalan ng malay|hinimatay/i,\n  'hard to wake': /hard to wake|susah dibangunkan|mahirap gisingin/i,\n};\nconst notes = (d.notes || []).slice(0, 20);\nconst redFlagHits = [];\nfor (const n of notes) {\n  const text = (n.original || '') + ' ' + (n.translated || '');\n  for (const [flag, re] of Object.entries(RED_FLAGS)) if (re.test(text)) redFlagHits.push({ flag, date: n.date });\n}\n\nconst carer = d.carer || [];\nlet lastRest = null;\nfor (const c of carer) if (c.rested_today) lastRest = c.date;\nconst firstCheckin = carer.length ? carer[0].date : null;\nconst since = lastRest || firstCheckin;\nconst daysSinceRest = since ? Math.floor((Date.now() - new Date(since).getTime()) / 864e5) : null;\nconst recentMoods = carer.slice(-7).map(c => c.mood).filter(m => m != null);\n\nreturn [{ json: {\n  senior_id: seniorId,\n  senior: d.senior,\n  signals: { meal_intake_pct: meal, sit_to_stand_seconds: mobility },\n  combined_flag: !!(meal.flagged && mobility.flagged),\n  red_flag_hits: redFlagHits,\n  notes,\n  carer: {\n    helper: carer.length ? carer[carer.length - 1].helper : null,\n    language: carer.length ? carer[carer.length - 1].language : null,\n    days_since_rest_day: daysSinceRest,\n    rest_day_ever_recorded: !!lastRest,\n    avg_mood_last_7_days: recentMoods.length ? +(recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length).toFixed(1) : null,\n  },\n} }];"
+      },
+      "id": "dc5fcf4f-e542-4e0a-a631-198cce4fd8b2",
+      "name": "Compute baseline stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'deepseek-flash', reasoning_effort: 'low', max_tokens: 8000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: \"You are Teman's care-trend analyst. You support a GP, a family and a domestic helper caring for a frail older adult in Singapore.\\n\\nRules:\\n- You flag trends and suggest who should look at what. You never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing medication.\\n- Use only the numbers provided. Do not recompute or invent figures.\\n- Treat helper notes as observations, not facts. Quote dates when you refer to them.\\n- If any note mentions a fall, chest pain, breathlessness, sudden confusion, slurred speech, fainting or being hard to wake, set urgency to \\\"urgent\\\" and tell the family to call 995.\\n- Write the helper message in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 practical steps.\\n\\nReturn ONLY a JSON object with exactly these keys:\\n{\\n  \\\"urgency\\\": \\\"routine\\\" | \\\"review_soon\\\" | \\\"urgent\\\",\\n  \\\"headline\\\": \\\"one plain sentence for the GP, under 20 words\\\",\\n  \\\"gp_summary\\\": \\\"3-5 sentences for the GP: what changed, since when, by how much, and what the notes add\\\",\\n  \\\"symptom_tags\\\": [{\\\"tag\\\": \\\"Dizziness\\\", \\\"count\\\": 3, \\\"dates\\\": [\\\"2026-10-11\\\"]}],\\n  \\\"worth_reviewing\\\": [\\\"short items a GP may want to check, phrased as questions, no diagnoses\\\"],\\n  \\\"red_flags\\\": [\\\"any red-flag phrases found in notes, empty if none\\\"],\\n  \\\"family_message\\\": \\\"2-3 kind sentences for the family in English, with one clear next step\\\",\\n  \\\"helper_message\\\": \\\"message in the helper's language\\\",\\n  \\\"helper_message_en\\\": \\\"English translation of helper_message\\\",\\n  \\\"carer_wellbeing\\\": \\\"one sentence about the helper's own wellbeing, or empty string\\\"\\n}\" }, { role: 'user', content: 'Patient data and computed trend statistics:\\n' + JSON.stringify($json, null, 2) }] }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "1577a0d5-e632-469e-83f7-801410161bae",
+      "name": "DeepSeek analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "DeepSeek API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const stats = $('Compute baseline stats').first().json;\nconst raw = ($input.first().json.choices?.[0]?.message?.content || '').trim();\nlet analysis;\ntry {\n  analysis = JSON.parse(raw.replace(/^\\x60{3}(?:json)?\\s*/i, '').replace(/\\x60{3}\\s*$/, ''));\n} catch (e) {\n  analysis = { urgency: 'review_soon', headline: 'AI analysis could not be parsed; review the raw trends.', parse_error: true, raw };\n}\nconst LEVELS = ['routine', 'review_soon', 'urgent'];\nif (!LEVELS.includes(analysis.urgency)) analysis.urgency = 'review_soon';\n// Safety nets: the model can raise urgency but never lower it below what the code found.\nif (stats.combined_flag && analysis.urgency === 'routine') analysis.urgency = 'review_soon';\nif (stats.red_flag_hits.length) {\n  analysis.urgency = 'urgent';\n  const found = [...new Set(stats.red_flag_hits.map(h => h.flag + ' (' + h.date + ')'))];\n  analysis.red_flags = [...new Set([...(analysis.red_flags || []), ...found])];\n  if (!/995/.test(analysis.family_message || '')) {\n    analysis.family_message = 'A note mentions ' + found.join(', ') + '. If this is happening now, call 995. ' + (analysis.family_message || '');\n  }\n}\nreturn [{ json: {\n  senior_id: stats.senior_id,\n  generated_at: new Date().toISOString(),\n  urgency: analysis.urgency,\n  stats: stats.signals,\n  carer: stats.carer,\n  analysis,\n} }];"
+      },
+      "id": "d672fc01-6de8-4d14-b6c9-045f21e2a9cc",
+      "name": "Parse and check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_analyses (senior_id, urgency, result)\nVALUES ($1, $2, $3::jsonb)\nRETURNING id, created_at;",
+        "options": {
+          "queryReplacement": "={{ [$json.senior_id, $json.urgency, JSON.stringify($json)] }}"
+        }
+      },
+      "id": "660bb2f1-c507-44f5-b09b-0ce196330eda",
+      "name": "Save analysis",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Teman Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Parse and check').first().json) }}",
+        "options": {}
+      },
+      "id": "c9a2bec7-d886-4ec3-aff4-ec4283cc24d6",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get patient data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get patient data": {
+      "main": [
+        [
+          {
+            "node": "Compute baseline stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute baseline stats": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse and check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and check": {
+      "main": [
+        [
+          {
+            "node": "Save analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save analysis": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

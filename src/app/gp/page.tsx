@@ -1,16 +1,23 @@
 import Shell from "@/components/Shell";
 import { requireRole } from "@/lib/auth";
-import { getAlerts, getSenior, getSignals, getVoiceNotes } from "@/lib/data";
+import { getAlerts, getLatestAnalysis, getSenior, getSignals, getVoiceNotes } from "@/lib/data";
 import TrendChart from "./TrendChart";
+import AnalysisPanel from "./AnalysisPanel";
 
 export default async function GpPage() {
   const session = await requireRole("gp");
   const senior = await getSenior(session.household);
-  const [signals, alerts, notes] = await Promise.all([getSignals(senior.id), getAlerts(senior.id), getVoiceNotes(senior.id, 10)]);
+  const [signals, alerts, notes, analysis] = await Promise.all([
+    getSignals(senior.id),
+    getAlerts(senior.id),
+    getVoiceNotes(senior.id, 10),
+    getLatestAnalysis(senior.id),
+  ]);
 
   return (
     <Shell title={`${senior.name}, ${senior.age}`} subtitle={senior.conditions.join(", ")}>
-      {alerts[0] && (
+      <AnalysisPanel initial={analysis} />
+      {!analysis && alerts[0] && (
         <p className="rounded-xl bg-amber-100 p-3">
           <strong>Flag:</strong> {alerts[0].signals.join(" + ")} below personal baseline (3-day mean vs. 14-day baseline, &gt;1.5 SD).
         </p>

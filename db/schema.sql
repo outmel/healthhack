@@ -1,5 +1,5 @@
 -- Teman schema. Six tables from the build plan; password_hash and meta are the only additions.
-DROP TABLE IF EXISTS carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
+DROP TABLE IF EXISTS ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
 
 CREATE TABLE users (
   id            SERIAL PRIMARY KEY,
@@ -60,4 +60,13 @@ CREATE TABLE carer_checkins (
   rested_today BOOLEAN NOT NULL,
   note         TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Written by the n8n "Teman – patient trend analysis" workflow (n8n/teman-analysis-workflow.json).
+CREATE TABLE ai_analyses (
+  id         SERIAL PRIMARY KEY,
+  senior_id  INT  NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
+  urgency    TEXT NOT NULL,
+  result     JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

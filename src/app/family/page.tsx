@@ -1,6 +1,6 @@
 import Shell from "@/components/Shell";
 import { requireRole } from "@/lib/auth";
-import { getAlerts, getCarerStatus, getSenior, getSignals, getVoiceNotes } from "@/lib/data";
+import { getAlerts, getCarerStatus, getLatestAnalysis, getSenior, getSignals, getVoiceNotes } from "@/lib/data";
 
 const sgDate = (d: string | Date) =>
   new Date(d).toLocaleString("en-SG", { timeZone: "Asia/Singapore", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -8,11 +8,12 @@ const sgDate = (d: string | Date) =>
 export default async function FamilyPage() {
   const session = await requireRole("family");
   const senior = await getSenior(session.household);
-  const [signals, alerts, notes, carer] = await Promise.all([
+  const [signals, alerts, notes, carer, ai] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 3),
     getCarerStatus(session.household),
+    getLatestAnalysis(senior.id),
   ]);
   const meal = signals.meal.status;
   const mob = signals.mobility.status;
@@ -23,6 +24,7 @@ export default async function FamilyPage() {
         <section key={a.id} className={`rounded-2xl p-5 ${a.severity === "review" ? "bg-amber-100 ring-2 ring-amber-400" : "bg-sky-50"}`}>
           <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">{a.severity === "review" ? "Worth a GP visit" : "Keep an eye on"}</p>
           <p className="mt-1 text-xl font-semibold">{a.message}</p>
+          {ai?.analysis.family_message && <p className="mt-2 text-stone-700">{ai.analysis.family_message}</p>}
           <p className="mt-2 text-sm text-stone-600">{sgDate(a.created_at)} · signals: {a.signals.join(" + ")}</p>
         </section>
       ))}
@@ -51,6 +53,7 @@ export default async function FamilyPage() {
           <p className="mt-1 text-lg">
             {carer.name} hasn&apos;t had a rest day in {carer.daysWithoutRest} days. Could you plan a day off for her this week?
           </p>
+          {ai?.analysis.carer_wellbeing && <p className="mt-1 text-stone-600">{ai.analysis.carer_wellbeing}</p>}
         </section>
       )}
     </Shell>
