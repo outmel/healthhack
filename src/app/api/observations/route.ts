@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getSenior } from "@/lib/data";
 import { recompute } from "@/lib/baseline";
-import { translateNote } from "@/lib/claude";
+import { translateNote } from "@/lib/ai";
 
 export async function POST(req: Request) {
   const session = await getSession();

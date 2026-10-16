@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getSenior } from "@/lib/data";
 import { recompute } from "@/lib/baseline";
-import { estimatePlate } from "@/lib/claude";
+import { estimatePlate } from "@/lib/ai";
 
 const TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 type MediaType = (typeof TYPES)[number];
