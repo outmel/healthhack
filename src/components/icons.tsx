@@ -133,11 +133,32 @@ export const Download = ({ className }: P) => (
   </svg>
 );
 
-/** Teman logo mark: two overlapping hearts, one caring for the other. */
-export const Logo = ({ className = "h-8 w-8" }: P) => (
-  <svg className={className} viewBox="0 0 32 32" aria-hidden>
-    <rect width="32" height="32" rx="10" fill="#0e6b63" />
-    <path d="M16 24s-7-4.3-7-9.2A3.8 3.8 0 0 1 16 13a3.8 3.8 0 0 1 7 1.8C23 19.7 16 24 16 24Z" fill="#fbf7f1" />
-    <circle cx="22.5" cy="9.5" r="2.5" fill="#f3cf8f" />
+export const Play = ({ className }: P) => (
+  <svg {...base(className)}>
+    <path d="M7 4v16l13-8z" fill="currentColor" />
+  </svg>
+);
+
+export const Bulb = ({ className }: P) => (
+  <svg {...base(className)}>
+    <path d="M15 14c.2-1 .7-1.7 1.5-2.5A6 6 0 1 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+    <path d="M9 18h6" />
+    <path d="M10 22h4" />
+  </svg>
+);
+
+export const Calendar = ({ className }: P) => (
+  <svg {...base(className)}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <path d="M16 2v4M8 2v4M3 10h18" />
+  </svg>
+);
+
+/** Teman logo mark: a pandan leaf on a pandan-green tile. */
+export const Logo = ({ className = "h-10 w-10" }: P) => (
+  <svg className={className} viewBox="0 0 40 40" aria-hidden>
+    <rect width="40" height="40" rx="12" fill="#1F5C45" />
+    <path d="M20 9c5 4 7 8 7 12a7 7 0 0 1-14 0c0-4 2-8 7-12z" fill="none" stroke="#FBF6EC" strokeWidth="2.4" strokeLinejoin="round" />
+    <path d="M20 15v16" fill="none" stroke="#FBF6EC" strokeWidth="2.4" strokeLinecap="round" />
   </svg>
 );

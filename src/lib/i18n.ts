@@ -1,7 +1,8 @@
 // Helper-facing strings. Lane 4 owns the translations; keep keys identical across languages.
 export const LANGS = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" } as const;
-export const LANG_SHORT: Record<keyof typeof LANGS, string> = { id: "Bahasa", tl: "Tagalog", en: "English" };
+export const LANG_SHORT: Record<keyof typeof LANGS, string> = { id: "ID", tl: "TL", en: "EN" };
 export type Lang = keyof typeof LANGS;
+export const DATE_LOCALE: Record<Lang, string> = { id: "id-ID", tl: "fil-PH", en: "en-SG" };
 export const SPEECH_LOCALE: Record<Lang, string> = { id: "id-ID", tl: "fil-PH", en: "en-SG" };
 
 const en = {
@@ -33,7 +34,7 @@ const en = {
   restedToday: "Did you rest today?",
   yes: "Yes",
   no: "No",
-  emergency: "Emergency? Call 995",
+  emergency: "She fell / not responding? Call 995",
   notDiagnosis: "Teman notices changes. It does not diagnose.",
   working: "Working…",
   failed: "Something went wrong. Try again.",
@@ -42,7 +43,7 @@ const en = {
   doneToday: "Done today",
   tipTitle: "A note from Teman",
   andYou: "And you, {name}?",
-  moodWords: ["Very hard", "Hard", "Okay", "Good", "Great"],
+  moodWords: ["Good", "Tired", "Sad"],
   thanksCheckin: "Thank you. Take care of yourself too.",
   stepBefore: "Photo before eating",
   stepAfter: "Photo after eating",
@@ -50,6 +51,13 @@ const en = {
   stayClose: "Stay close to her so she is safe.",
   voiceIntro: "Tell Teman what you noticed today. You can speak in your own language.",
   allDone: "All done for today. Thank you!",
+  greetMorning: "Good morning",
+  greetAfternoon: "Good afternoon",
+  greetEvening: "Good evening",
+  tasksFor: "Today's tasks for {name}",
+  now: "Now",
+  tipToday: "Tip for today",
+  noRest: "You haven't had a day off in {n} days. Your family has been told.",
 };
 export type Dict = typeof en;
 
@@ -82,7 +90,7 @@ const id: Dict = {
   restedToday: "Apakah Anda istirahat hari ini?",
   yes: "Ya",
   no: "Tidak",
-  emergency: "Darurat? Telepon 995",
+  emergency: "Ibu jatuh / tidak sadar? Telepon 995",
   notDiagnosis: "Teman memperhatikan perubahan. Teman tidak mendiagnosis.",
   working: "Sedang diproses…",
   failed: "Ada masalah. Coba lagi.",
@@ -91,7 +99,7 @@ const id: Dict = {
   doneToday: "Sudah hari ini",
   tipTitle: "Pesan dari Teman",
   andYou: "Dan kamu, {name}?",
-  moodWords: ["Sangat berat", "Berat", "Biasa", "Baik", "Sangat baik"],
+  moodWords: ["Baik", "Capek", "Sedih"],
   thanksCheckin: "Terima kasih. Jaga dirimu juga ya.",
   stepBefore: "Foto sebelum makan",
   stepAfter: "Foto sesudah makan",
@@ -99,6 +107,13 @@ const id: Dict = {
   stayClose: "Tetap di dekat Ibu agar aman.",
   voiceIntro: "Ceritakan apa yang kamu lihat hari ini. Boleh pakai bahasamu sendiri.",
   allDone: "Semua selesai hari ini. Terima kasih!",
+  greetMorning: "Selamat pagi",
+  greetAfternoon: "Selamat siang",
+  greetEvening: "Selamat malam",
+  tasksFor: "Tugas hari ini untuk {name}",
+  now: "Sekarang",
+  tipToday: "Tips hari ini",
+  noRest: "Kamu belum libur {n} hari. Keluarga sudah diberi tahu.",
 };
 
 const tl: Dict = {
@@ -130,7 +145,7 @@ const tl: Dict = {
   restedToday: "Nakapagpahinga ka ba ngayon?",
   yes: "Oo",
   no: "Hindi",
-  emergency: "Emergency? Tumawag sa 995",
+  emergency: "Nahulog o hindi sumasagot? Tumawag sa 995",
   notDiagnosis: "Napapansin ng Teman ang mga pagbabago. Hindi ito nagdi-diagnose.",
   working: "Pinoproseso…",
   failed: "May problema. Subukan ulit.",
@@ -139,7 +154,7 @@ const tl: Dict = {
   doneToday: "Tapos na ngayon",
   tipTitle: "Mensahe mula sa Teman",
   andYou: "Ikaw naman, {name}?",
-  moodWords: ["Napakahirap", "Mahirap", "Okay lang", "Mabuti", "Napakabuti"],
+  moodWords: ["Mabuti", "Pagod", "Malungkot"],
   thanksCheckin: "Salamat. Alagaan mo rin ang sarili mo.",
   stepBefore: "Litrato bago kumain",
   stepAfter: "Litrato pagkatapos kumain",
@@ -147,6 +162,13 @@ const tl: Dict = {
   stayClose: "Manatiling malapit sa kanya para ligtas.",
   voiceIntro: "Sabihin sa Teman ang napansin mo ngayon. Puwede kang magsalita sa sarili mong wika.",
   allDone: "Tapos na lahat ngayong araw. Salamat!",
+  greetMorning: "Magandang umaga",
+  greetAfternoon: "Magandang hapon",
+  greetEvening: "Magandang gabi",
+  tasksFor: "Mga gawain ngayon para kay {name}",
+  now: "Ngayon",
+  tipToday: "Tip ngayong araw",
+  noRest: "Wala ka pang day off sa loob ng {n} araw. Nasabihan na ang pamilya.",
 };
 
 export const DICTS: Record<Lang, Dict> = { en, id, tl };

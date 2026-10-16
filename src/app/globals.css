@@ -1,32 +1,36 @@
 @import "tailwindcss";
 
-/* Warm, calm palette for caregivers: cream background, deep teal for actions,
-   amber for "worth watching", coral only for emergencies. */
+/* "Pandan & Kaya": kaya-cream pages, pandan green for actions and "normal for her",
+   turmeric for "changing, keep watch", chilli only for 995, kueh rose for the carer. */
 @theme inline {
-  --font-sans: var(--font-nunito);
+  --font-sans: var(--font-jakarta);
 
-  --color-cream: #fbf7f1;
+  --color-cream: #fbf6ec;
   --color-paper: #ffffff;
-  --color-line: #ece4d8;
-  --color-ink: #1f2a2e;
-  --color-muted: #5f6b6e;
-  --color-faint: #8b9497;
+  --color-line: #e6dcc8;
+  --color-track: #f1ece1;
+  --color-ink: #22201c;
+  --color-body: #3a362f;
+  --color-muted: #5a544b;
+  --color-faint: #7a7369;
 
-  --color-brand: #0e6b63;
-  --color-brand-dark: #0a524c;
-  --color-brand-soft: #e2f1ed;
+  --color-brand: #1f5c45;
+  --color-brand-dark: #163f30;
+  --color-brand-soft: #dcebdf;
 
-  --color-sun: #b86e00;
-  --color-sun-soft: #fff3dc;
-  --color-sun-line: #f3cf8f;
+  --color-turmeric: #e8a317;
+  --color-sun: #7a4a00;
+  --color-sun-soft: #fcebc4;
+  --color-sun-line: #e8a317;
+  --color-sun-deep: #3a2a08;
 
-  --color-coral: #c8442a;
-  --color-coral-soft: #fdebe5;
+  --color-coral: #b3261e;
+  --color-coral-soft: #f9e1de;
 
-  --color-sage: #3d7a3a;
-  --color-sage-soft: #e9f3e3;
-
-  --color-lilac-soft: #f1ecf8;
+  --color-rose: #8e2f45;
+  --color-rose-soft: #f4dcdc;
+  --color-rose-dark: #5e1d2d;
+  --color-rose-deep: #3d121d;
 }
 
 html {
@@ -36,7 +40,15 @@ html {
 body {
   background: var(--color-cream);
   color: var(--color-ink);
-  font-family: var(--font-nunito), system-ui, sans-serif;
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+}
+
+/* Uppercase section label used across views. */
+.eyebrow {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* Visible keyboard focus everywhere. */
@@ -44,4 +56,9 @@ body {
   outline: 3px solid var(--color-brand);
   outline-offset: 2px;
   border-radius: 12px;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
 }

@@ -2,18 +2,21 @@
 
 // Phone-first helper view: three big tasks, three languages, nothing to chat with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DICTS, LANG_SHORT, SPEECH_LOCALE, type Dict, type Lang } from "@/lib/i18n";
+import { DATE_LOCALE, DICTS, LANG_SHORT, SPEECH_LOCALE, type Dict, type Lang } from "@/lib/i18n";
 import LogoutButton from "@/components/LogoutButton";
-import { Camera, Chair, Check, ChevronLeft, ChevronRight, Logo, Mic, Phone, Sparkle, Utensils } from "@/components/icons";
+import { Wordmark } from "@/components/Shell";
+import { Bulb, Camera, Chair, Check, ChevronLeft, ChevronRight, Mic, Phone, Play, Utensils } from "@/components/icons";
 
 type Screen = "home" | "meal" | "stand" | "voice";
 type Tip = { text: string; en: string } | null;
 type Done = { meal: boolean; stand: boolean; voice: boolean; checkin: boolean };
 type IconT = (p: { className?: string }) => React.ReactElement;
+const TZ = "Asia/Singapore";
+const LANG_NAME: Record<Lang, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
 
 export default function HelperApp({
-  name, seniorName, initialLang, initialDone, tip,
-}: { name: string; seniorName: string; initialLang: Lang; initialDone: Done; tip: Tip }) {
+  name, seniorName, initialLang, initialDone, daysWithoutRest, tip,
+}: { name: string; seniorName: string; initialLang: Lang; initialDone: Done; daysWithoutRest: number | null; tip: Tip }) {
   const [lang, setLang] = useState<Lang>(initialLang in DICTS ? initialLang : "id");
   const [screen, setScreen] = useState<Screen>("home");
   const [done, setDone] = useState(initialDone);
@@ -25,101 +28,129 @@ export default function HelperApp({
   };
   const count = [done.meal, done.stand, done.voice].filter(Boolean).length;
 
+  const now = new Date();
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: TZ }).format(now));
+  const greet = hour < 11 ? t.greetMorning : hour < 18 ? t.greetAfternoon : t.greetEvening;
+  const date = now.toLocaleDateString(DATE_LOCALE[lang], { weekday: "long", day: "numeric", month: "long", timeZone: TZ });
+
+  const tasks: { key: Exclude<Screen, "home">; Icon: IconT; label: string; hint: string; done: boolean }[] = [
+    { key: "meal", Icon: Utensils, label: t.meal, hint: t.mealHint, done: done.meal },
+    { key: "stand", Icon: Chair, label: t.stand, hint: t.standHint, done: done.stand },
+    { key: "voice", Icon: Mic, label: t.voice, hint: t.voiceHint, done: done.voice },
+  ];
+  const current = tasks.find((k) => !k.done)?.key;
+
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 px-4 pb-28 pt-4">
-      <nav className="flex items-center justify-between gap-2">
-        <Logo className="h-9 w-9" />
-        <div role="group" aria-label="Language" className="flex rounded-full bg-paper p-1 ring-1 ring-line">
-          {(Object.keys(LANG_SHORT) as Lang[]).map((k) => (
-            <button
-              key={k}
-              onClick={() => setLang(k)}
-              aria-pressed={lang === k}
-              className={`rounded-full px-3 py-1.5 text-sm font-bold transition ${lang === k ? "bg-brand text-white" : "text-muted"}`}
-            >
-              {LANG_SHORT[k]}
-            </button>
-          ))}
+    <main className="mx-auto flex w-full max-w-[430px] flex-1 flex-col pb-28">
+      <header className="rounded-b-[28px] bg-brand px-5 pb-6 pt-4 text-cream">
+        <div className="flex items-center justify-between gap-2">
+          <Wordmark light />
+          <div role="group" aria-label="Language" className="flex rounded-full bg-white/[.14] p-1">
+            {(Object.keys(LANG_SHORT) as Lang[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => setLang(k)}
+                aria-pressed={lang === k}
+                aria-label={LANG_NAME[k]}
+                className={`min-w-11 rounded-full px-3 py-1.5 text-sm font-extrabold transition ${lang === k ? "bg-cream text-brand" : "text-cream/85"}`}
+              >
+                {LANG_SHORT[k]}
+              </button>
+            ))}
+          </div>
         </div>
-      </nav>
+        {screen === "home" && (
+          <>
+            <p className="mt-6 text-[15px] text-cream/80" suppressHydrationWarning>{date}</p>
+            <h1 className="mt-1 text-[28px] font-extrabold leading-tight tracking-tight" suppressHydrationWarning>{greet}, {name}</h1>
+            <p className="text-[17px] text-cream/85">{t.tasksFor.replace("{name}", seniorName)}</p>
+            <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/20" aria-hidden>
+              <div className="h-full rounded-full bg-turmeric transition-all" style={{ width: `${(count / 3) * 100}%` }} />
+            </div>
+            <p className="mt-2 text-[15px] font-semibold">{count === 3 ? t.allDone : t.progress.replace("{n}", String(count))}</p>
+          </>
+        )}
+      </header>
 
-      {screen === "home" && (
-        <>
-          <header>
-            <h1 className="text-3xl font-extrabold tracking-tight">{t.hello}, {name} 👋</h1>
-            <p className="text-lg text-muted">{t.caringFor} {seniorName}</p>
-          </header>
-
-          {tip && (
-            <section className="rounded-3xl bg-sun-soft p-4 ring-1 ring-sun-line">
-              <p className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wider text-sun">
-                <Sparkle className="h-4 w-4" /> {t.tipTitle}
-              </p>
-              <p className="mt-1 text-lg leading-snug">{lang === "en" && tip.en ? tip.en : tip.text}</p>
+      <div className="flex flex-col gap-4 px-4 pt-5">
+        {screen === "home" && (
+          <>
+            <section aria-label={t.todayTitle} className="flex flex-col gap-3">
+              {tasks.map((k) => (
+                <TaskCard key={k.key} Icon={k.Icon} label={k.label} hint={k.hint} done={k.done} current={k.key === current} t={t} onClick={() => setScreen(k.key)} />
+              ))}
             </section>
-          )}
 
-          <section aria-labelledby="today" className="flex flex-col gap-3">
-            <div className="flex items-end justify-between">
-              <h2 id="today" className="text-xl font-extrabold">{t.todayTitle}</h2>
-              <span className="text-muted">{count === 3 ? t.allDone : t.progress.replace("{n}", String(count))}</span>
-            </div>
-            <div className="h-2.5 overflow-hidden rounded-full bg-line" aria-hidden>
-              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${(count / 3) * 100}%` }} />
-            </div>
-            <TaskTile Icon={Utensils} label={t.meal} hint={t.mealHint} done={done.meal} doneLabel={t.doneToday} onClick={() => setScreen("meal")} />
-            <TaskTile Icon={Chair} label={t.stand} hint={t.standHint} done={done.stand} doneLabel={t.doneToday} onClick={() => setScreen("stand")} />
-            <TaskTile Icon={Mic} label={t.voice} hint={t.voiceHint} done={done.voice} doneLabel={t.doneToday} onClick={() => setScreen("voice")} />
-          </section>
+            {tip && (
+              <section className="rounded-[22px] bg-sun-soft p-5 text-sun-deep">
+                <p className="eyebrow flex items-center gap-1.5 text-sun">
+                  <Bulb className="h-4 w-4" /> {t.tipToday}
+                </p>
+                <p className="mt-1.5 text-[17px] leading-snug">{lang === "en" && tip.en ? tip.en : tip.text}</p>
+              </section>
+            )}
 
-          <CheckIn t={t} name={name} done={done.checkin} onDone={() => markDone("checkin")} />
-          <p className="text-center text-sm text-faint">{t.notDiagnosis}</p>
-          <div className="flex justify-center"><LogoutButton /></div>
-        </>
-      )}
-      {screen === "meal" && <MealCapture t={t} onBack={back} onSaved={() => markDone("meal")} />}
-      {screen === "stand" && <StandTest t={t} onBack={back} onSaved={() => markDone("stand")} />}
-      {screen === "voice" && <VoiceNote t={t} lang={lang} onBack={back} onSaved={() => markDone("voice")} />}
+            <CheckIn t={t} name={name} done={done.checkin} daysWithoutRest={daysWithoutRest} onDone={() => markDone("checkin")} />
+            <p className="text-center text-sm text-faint">{t.notDiagnosis}</p>
+            <div className="flex justify-center"><LogoutButton /></div>
+          </>
+        )}
+        {screen === "meal" && <MealCapture t={t} onBack={back} onSaved={() => markDone("meal")} />}
+        {screen === "stand" && <StandTest t={t} onBack={back} onSaved={() => markDone("stand")} />}
+        {screen === "voice" && <VoiceNote t={t} lang={lang} onBack={back} onSaved={() => markDone("voice")} />}
+      </div>
 
       {/* Always reachable, never in the way. */}
       <a
         href="tel:995"
-        className="fixed inset-x-4 bottom-4 mx-auto flex max-w-md items-center justify-center gap-2 rounded-2xl bg-coral py-4 text-lg font-extrabold text-white shadow-lg"
+        className="fixed inset-x-4 bottom-4 mx-auto flex min-h-[60px] max-w-[398px] items-center justify-center gap-2 rounded-2xl bg-coral px-4 text-center text-[17px] font-extrabold text-white shadow-lg"
       >
-        <Phone className="h-5 w-5" /> {t.emergency}
+        <Phone className="h-5 w-5 shrink-0" /> {t.emergency}
       </a>
     </main>
   );
 }
 
-function TaskTile({ Icon, label, hint, done, doneLabel, onClick }: { Icon: IconT; label: string; hint: string; done: boolean; doneLabel: string; onClick: () => void }) {
+function TaskCard({ Icon, label, hint, done, current, t, onClick }: { Icon: IconT; label: string; hint: string; done: boolean; current: boolean; t: Dict; onClick: () => void }) {
+  if (current) {
+    return (
+      <div className="rounded-[22px] border-2 border-brand bg-paper p-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand text-cream"><Icon className="h-6 w-6" /></span>
+          <span>
+            <span className="eyebrow block text-brand">{t.now}</span>
+            <span className="block text-xl font-extrabold leading-tight">{label}</span>
+          </span>
+        </div>
+        <p className="mt-3 rounded-2xl bg-cream px-4 py-3 text-[17px] text-body">{hint}</p>
+        <button onClick={onClick} className="mt-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand text-lg font-extrabold text-cream hover:bg-brand-dark">
+          <Play className="h-5 w-5" /> {t.start}
+        </button>
+      </div>
+    );
+  }
   return (
-    <button
-      onClick={onClick}
-      className={`flex min-h-24 items-center gap-4 rounded-3xl p-4 text-left shadow-sm ring-1 transition active:scale-[0.99] ${
-        done ? "bg-paper ring-line" : "bg-brand text-white ring-brand"
-      }`}
-    >
-      <span className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl ${done ? "bg-sage-soft text-sage" : "bg-white/15"}`}>
-        {done ? <Check className="h-8 w-8" /> : <Icon className="h-8 w-8" />}
+    <button onClick={onClick} className="flex items-center gap-3 rounded-[22px] border border-line bg-paper p-4 text-left transition active:scale-[0.99]">
+      <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${done ? "bg-brand-soft text-brand-dark" : "border-2 border-brand text-brand"}`}>
+        {done ? <Check className="h-6 w-6" /> : <Icon className="h-6 w-6" />}
       </span>
       <span className="flex-1">
-        <span className="block text-2xl font-extrabold leading-tight">{label}</span>
-        <span className={`block ${done ? "font-semibold text-sage" : "text-white/80"}`}>{done ? doneLabel : hint}</span>
+        <span className="block text-lg font-extrabold leading-tight">{label}</span>
+        <span className={`block text-[15px] ${done ? "font-semibold text-brand" : "text-muted"}`}>{done ? t.doneToday : hint}</span>
       </span>
-      <ChevronRight className={`h-6 w-6 ${done ? "text-faint" : "text-white/70"}`} />
+      <ChevronRight className="h-6 w-6 text-faint" />
     </button>
   );
 }
 
 function Screen({ title, Icon, onBack, t, children }: { title: string; Icon: IconT; onBack: () => void; t: Dict; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-5">
-      <button onClick={onBack} className="flex items-center gap-1 self-start rounded-full bg-paper px-3 py-2 font-bold text-brand ring-1 ring-line">
+    <section className="flex flex-col gap-4">
+      <button onClick={onBack} className="flex min-h-11 items-center gap-1 self-start rounded-full border border-line bg-paper px-3 font-bold text-brand">
         <ChevronLeft className="h-5 w-5" /> {t.back}
       </button>
-      <h1 className="flex items-center gap-3 text-3xl font-extrabold tracking-tight">
-        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-soft text-brand"><Icon className="h-7 w-7" /></span>
+      <h1 className="flex items-center gap-3 text-[28px] font-extrabold tracking-tight">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand text-cream"><Icon className="h-6 w-6" /></span>
         {title}
       </h1>
       {children}
@@ -127,12 +158,12 @@ function Screen({ title, Icon, onBack, t, children }: { title: string; Icon: Ico
   );
 }
 
-const primary = "w-full rounded-2xl bg-brand py-4 text-xl font-extrabold text-white shadow-sm hover:bg-brand-dark disabled:bg-line disabled:text-faint disabled:shadow-none";
+const primary = "min-h-14 w-full rounded-2xl bg-brand text-lg font-extrabold text-cream hover:bg-brand-dark disabled:bg-track disabled:text-faint";
 
 function Saved({ text, onBack }: { text: string; onBack: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-4 rounded-3xl bg-sage-soft p-6 text-center">
-      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-sage"><Check className="h-9 w-9" /></span>
+    <div className="flex flex-col items-center gap-4 rounded-[22px] bg-brand-soft p-6 text-center text-brand-dark">
+      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-paper text-brand"><Check className="h-9 w-9" /></span>
       <p className="text-xl font-bold">{text}</p>
       <button className={primary} onClick={onBack}>OK</button>
     </div>
@@ -165,7 +196,7 @@ function MealCapture({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSa
         <PhotoPicker step={2} label={t.stepAfter} hint={t.takePhoto} file={after} onFile={setAfter} />
       </div>
       {result ? (
-        <div className="flex flex-col items-center gap-2 rounded-3xl bg-paper p-6 text-center ring-1 ring-line">
+        <div className="flex flex-col items-center gap-2 rounded-[22px] border border-line bg-paper p-6 text-center">
           <p className="text-lg text-muted">{t.ate}</p>
           <p className="text-6xl font-extrabold text-brand">{result.bucket}%</p>
           <MealBar pct={result.bucket} />
@@ -187,7 +218,7 @@ function MealBar({ pct }: { pct: number }) {
   return (
     <div className="flex gap-1.5" aria-hidden>
       {[0, 1, 2, 3].map((i) => (
-        <span key={i} className={`h-3 w-10 rounded-full ${i < filled ? "bg-brand" : "bg-line"}`} />
+        <span key={i} className={`h-3 w-10 rounded-full ${i < filled ? "bg-brand" : "bg-track"}`} />
       ))}
     </div>
   );
@@ -199,12 +230,12 @@ function PhotoPicker({ step, label, hint, file, onFile }: { step: number; label:
   return (
     <label className="flex cursor-pointer flex-col gap-2">
       <span className="flex items-center gap-2 font-bold">
-        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${file ? "bg-sage text-white" : "bg-brand-soft text-brand"}`}>
+        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${file ? "bg-brand text-cream" : "bg-brand-soft text-brand-dark"}`}>
           {file ? <Check className="h-4 w-4" /> : step}
         </span>
         {label}
       </span>
-      <span className="relative flex aspect-square items-center justify-center overflow-hidden rounded-3xl border-2 border-dashed border-line bg-paper">
+      <span className="relative flex aspect-square items-center justify-center overflow-hidden rounded-[22px] border-2 border-dashed border-line bg-paper">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={url} alt={label} className="h-full w-full object-cover" />
@@ -250,26 +281,26 @@ function StandTest({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSave
   return (
     <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}>
       {start === null && (
-        <div className="rounded-3xl bg-paper p-4 text-lg leading-snug ring-1 ring-line">
+        <div className="rounded-[22px] bg-paper p-4 text-[17px] leading-snug text-body ring-1 ring-line">
           <p>{t.standIntro}</p>
-          <p className="mt-2 font-bold text-sun">⚠ {t.stayClose}</p>
+          <p className="mt-3 rounded-2xl bg-sun-soft px-3 py-2 font-bold text-sun-deep">⚠ {t.stayClose}</p>
         </div>
       )}
-      <div className="rounded-3xl bg-paper p-6 text-center ring-1 ring-line">
+      <div className="rounded-[22px] border border-line bg-paper p-6 text-center">
         <p className="text-7xl font-extrabold tabular-nums tracking-tight">{elapsed.toFixed(1)}</p>
         <p className="text-lg text-muted">{t.seconds}</p>
         <div className="mt-4 flex justify-center gap-2" aria-label={`${reps} / 5`}>
           {[0, 1, 2, 3, 4].map((i) => (
-            <span key={i} className={`flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold ${i < reps ? "bg-brand text-white" : "bg-line text-faint"}`}>
+            <span key={i} className={`flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold ${i < reps ? "bg-brand text-cream" : "bg-track text-faint"}`}>
               {i + 1}
             </span>
           ))}
         </div>
       </div>
       {start === null ? (
-        <button className={primary} onClick={() => setStart(Date.now())}>{t.start}</button>
+        <button className={`${primary} flex items-center justify-center gap-2`} onClick={() => setStart(Date.now())}><Play className="h-5 w-5" /> {t.start}</button>
       ) : !finished ? (
-        <button className="min-h-44 rounded-3xl bg-sun text-2xl font-extrabold text-white shadow-md active:scale-[0.98]" onClick={() => setReps((r) => r + 1)}>
+        <button className="min-h-44 rounded-[22px] bg-turmeric text-2xl font-extrabold text-sun-deep active:scale-[0.98]" onClick={() => setReps((r) => r + 1)}>
           {t.tapEachStand}
         </button>
       ) : (
@@ -313,19 +344,21 @@ function VoiceNote({ t, lang, onBack, onSaved }: { t: Dict; lang: Lang; onBack: 
 
   return (
     <Screen title={t.voice} Icon={Mic} onBack={onBack} t={t}>
-      <p className="text-lg leading-snug text-muted">{t.voiceIntro}</p>
+      <p className="text-[17px] leading-snug text-body">{t.voiceIntro}</p>
       {Speech && (
         <button
           onClick={toggle}
-          className={`flex flex-col items-center gap-2 rounded-3xl py-8 text-xl font-extrabold text-white shadow-md ${listening ? "animate-pulse bg-coral" : "bg-brand"}`}
+          className={`flex flex-col items-center gap-3 rounded-[22px] border border-line bg-paper py-7 text-xl font-extrabold ${listening ? "text-brand-dark" : "text-brand"}`}
         >
-          <Mic className="h-12 w-12" />
+          <span className={`flex h-20 w-20 items-center justify-center rounded-full ${listening ? "animate-pulse bg-brand text-cream" : "border-2 border-brand"}`}>
+            <Mic className="h-9 w-9" />
+          </span>
           {listening ? t.recording : t.record}
         </button>
       )}
       <label className="flex flex-col gap-2">
         <span className="font-bold">{t.orType}</span>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="rounded-3xl border border-line bg-paper p-4 text-lg" />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="rounded-[22px] border border-line bg-paper p-4 text-[17px]" />
       </label>
       <button className={primary} disabled={!text.trim() || state === "busy"} onClick={save}>{state === "busy" ? t.working : t.save}</button>
       {state === "error" && <p className="rounded-2xl bg-coral-soft p-3 text-center font-semibold text-coral">{t.failed}</p>}
@@ -333,35 +366,44 @@ function VoiceNote({ t, lang, onBack, onSaved }: { t: Dict; lang: Lang; onBack: 
   );
 }
 
-const FACES = ["😣", "🙁", "😐", "🙂", "😄"];
+// Three plain choices, stored on the existing 1–5 mood scale.
+const MOODS = [
+  { face: "🙂", value: 4 },
+  { face: "😮‍💨", value: 2 },
+  { face: "😢", value: 1 },
+];
 
-function CheckIn({ t, name, done, onDone }: { t: Dict; name: string; done: boolean; onDone: () => void }) {
+function CheckIn({ t, name, done, daysWithoutRest, onDone }: { t: Dict; name: string; done: boolean; daysWithoutRest: number | null; onDone: () => void }) {
   const [mood, setMood] = useState<number | null>(null);
   async function send(rested: boolean) {
     await fetch("/api/checkin", { method: "POST", body: JSON.stringify({ mood, rested }) });
     onDone();
   }
+  const restLine = daysWithoutRest != null && (
+    <p className="mt-3 text-[15px] font-semibold text-rose-dark">{t.noRest.replace("{n}", String(daysWithoutRest))}</p>
+  );
   if (done) {
     return (
-      <p className="flex items-center gap-3 rounded-3xl bg-lilac-soft p-4 text-lg font-semibold">
-        <span aria-hidden>💜</span> {t.thanksCheckin}
-      </p>
+      <section className="rounded-[22px] bg-rose-soft p-5 text-rose-deep">
+        <p className="text-lg font-bold">{t.thanksCheckin}</p>
+        {restLine}
+      </section>
     );
   }
   return (
-    <section className="rounded-3xl bg-lilac-soft p-5">
+    <section className="rounded-[22px] bg-rose-soft p-5 text-rose-deep">
       <h2 className="text-xl font-extrabold">{t.andYou.replace("{name}", name)}</h2>
-      <p className="text-muted">{t.howAreYou}</p>
-      <div className="mt-3 grid grid-cols-5 gap-1.5">
-        {FACES.map((f, i) => (
+      <p className="text-rose-dark">{t.howAreYou}</p>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {MOODS.map((m, i) => (
           <button
-            key={f}
-            onClick={() => setMood(i + 1)}
-            aria-pressed={mood === i + 1}
-            className={`flex flex-col items-center gap-1 rounded-2xl py-2 transition ${mood === i + 1 ? "bg-white shadow ring-2 ring-[#6b4fa0]" : "bg-white/50"}`}
+            key={m.value}
+            onClick={() => setMood(m.value)}
+            aria-pressed={mood === m.value}
+            className={`flex min-h-[72px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-paper font-bold transition ${mood === m.value ? "border-2 border-rose" : "border-2 border-transparent"}`}
           >
-            <span className="text-3xl">{f}</span>
-            <span className="text-[11px] font-semibold leading-tight text-muted">{t.moodWords[i]}</span>
+            <span className="text-2xl" aria-hidden>{m.face}</span>
+            <span className="text-[15px]">{t.moodWords[i]}</span>
           </button>
         ))}
       </div>
@@ -369,11 +411,12 @@ function CheckIn({ t, name, done, onDone }: { t: Dict; name: string; done: boole
         <div className="mt-4">
           <p className="mb-2 font-bold">{t.restedToday}</p>
           <div className="grid grid-cols-2 gap-2">
-            <button className="rounded-2xl bg-[#6b4fa0] py-3 text-lg font-bold text-white" onClick={() => send(true)}>{t.yes}</button>
-            <button className="rounded-2xl bg-white py-3 text-lg font-bold" onClick={() => send(false)}>{t.no}</button>
+            <button className="min-h-[52px] rounded-2xl bg-rose text-lg font-bold text-white" onClick={() => send(true)}>{t.yes}</button>
+            <button className="min-h-[52px] rounded-2xl border-2 border-rose bg-paper text-lg font-bold text-rose" onClick={() => send(false)}>{t.no}</button>
           </div>
         </div>
       )}
+      {restLine}
     </section>
   );
 }
