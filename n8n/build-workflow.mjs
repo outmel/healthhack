@@ -46,6 +46,11 @@ function analyse(series, worseIs) {
 const meal = analyse(d.meals, 'lower');
 const mobility = analyse(d.mobility, 'higher');
 
+// What the on-device pose model noticed on each chair-stand (e.g. "used_hands" on reps 3-5).
+const standFindings = (d.stand_tests || [])
+  .filter(t => Array.isArray(t.findings) && t.findings.length)
+  .map(t => ({ date: t.date, seconds: Number(t.seconds), findings: t.findings, hand_reps: t.hand_reps || [] }));
+
 // Red flags are matched in code too (English, Bahasa Indonesia, Tagalog), so urgency
 // never depends only on the model noticing them.
 const RED_FLAGS = {
@@ -77,6 +82,8 @@ return [{ json: {
   senior: d.senior,
   signals: { meal_intake_pct: meal, sit_to_stand_seconds: mobility },
   combined_flag: !!(meal.flagged && mobility.flagged),
+  medications: (d.senior && d.senior.medications) || [],
+  stand_findings: standFindings,
   red_flag_hits: redFlagHits,
   notes,
   carer: {
@@ -89,7 +96,7 @@ return [{ json: {
 } }];`;
 
 const parseAndCheck = String.raw`const stats = $('Compute baseline stats').first().json;
-const raw = ($input.first().json.choices?.[0]?.message?.content || '').trim();
+const raw = String($input.first().json.output || '').trim();
 let analysis;
 try {
   analysis = JSON.parse(raw.replace(/^\x60{3}(?:json)?\s*/i, '').replace(/\x60{3}\s*$/, ''));
@@ -117,12 +124,15 @@ return [{ json: {
   analysis,
 } }];`;
 
-const SYSTEM = `You are Teman's care-trend analyst. You support a GP, a family and a domestic helper caring for a frail older adult in Singapore.
+const ANALYSER_SYSTEM = `You are Teman's care-trend analyst. You support a GP, a family and a domestic helper caring for a frail older adult in Singapore.
 
 Rules:
 - You flag trends and suggest who should look at what. You never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing medication.
 - Use only the numbers provided. Do not recompute or invent figures.
 - Treat helper notes as observations, not facts. Quote dates when you refer to them.
+- Each note may carry "concerns" picked out at translation (e.g. "low fluid intake", "dizziness on standing"). Include them in symptom_tags, merged with what you find in the text.
+- stand_findings are what the on-device pose model saw during the chair-stand test: "used_hands" means she pushed up with her hands (hand_reps = which of the 5 stands). Mention it in gp_summary when present; it is an observation, not a diagnosis.
+- medications lists her current medicines. If she takes a blood-pressure medicine and the notes mention dizziness on standing or drinking little, a worth_reviewing item may ask whether a lying and standing blood pressure check and a medication review are due. Never suggest starting, stopping or changing a medicine.
 - If any note mentions a fall, chest pain, breathlessness, sudden confusion, slurred speech, fainting or being hard to wake, set urgency to "urgent" and tell the family to call 995.
 - Write the helper message in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 practical steps.
 
@@ -155,8 +165,14 @@ const QUERY = `SELECT json_build_object(
           FROM observations
           WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'
           GROUP BY 1) t),
+  'stand_tests', (
+    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'seconds', value,
+                                      'method', meta->>'method', 'findings', meta->'findings', 'hand_reps', meta->'hand_reps') ORDER BY created_at)
+    FROM observations
+    WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'),
   'notes', (
-    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'original', original_text, 'translated', translated_text) ORDER BY created_at DESC)
+    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'original', original_text, 'translated', translated_text,
+                                      'concerns', COALESCE(meta->'concerns', '[]'::jsonb)) ORDER BY created_at DESC)
     FROM observations
     WHERE senior_id = $1 AND type = 'voice' AND created_at > now() - interval '35 days'),
   'carer', (
@@ -166,54 +182,141 @@ const QUERY = `SELECT json_build_object(
       AND c.created_at > now() - interval '35 days')
 ) AS data;`;
 
+// Vetted Singapore contacts. The advisor agent can only pick from these by id; the
+// "Add care plan" node drops anything else and fills in contact details from here,
+// so a phone number never comes from the model. Check the numbers before going live.
+const RESOURCES = [
+  { id: "emergency", name: "SCDF emergency ambulance", contact: "995", topics: ["emergency", "fall", "chest pain", "breathless", "faint", "stroke", "confusion", "unresponsive"], what: "Life-threatening emergencies, any time." },
+  { id: "non_emergency_ambulance", name: "Non-emergency ambulance", contact: "1777", topics: ["transport", "non-urgent", "hospital"], what: "Transport to hospital when it is not an emergency." },
+  { id: "aic", name: "Agency for Integrated Care (AIC) hotline", contact: "1800 650 6060", topics: ["caregiver", "respite", "home care", "day care", "nursing", "subsidy", "meals", "rehab", "mobility", "falls", "nutrition"], what: "Home care, day care, respite and caregiver support schemes." },
+  { id: "healthhub", name: "HealthHub", contact: "healthhub.sg", topics: ["gp", "polyclinic", "appointment", "records", "booking", "health information"], what: "Book polyclinic appointments and read trusted health information." },
+  { id: "dementia_sg", name: "Dementia Singapore helpline", contact: "6377 0700", topics: ["memory", "confusion", "dementia", "behaviour"], what: "Advice when memory or behaviour changes." },
+  { id: "cde", name: "Centre for Domestic Employees (CDE) helpline", contact: "1800 2255 233", topics: ["helper", "domestic worker", "rest day", "carer", "wellbeing"], what: "Support for domestic helpers, including rest-day and wellbeing concerns." },
+  { id: "sos", name: "Samaritans of Singapore (SOS)", contact: "1767", topics: ["distress", "mood", "stress", "burnout", "carer", "emotional"], what: "24-hour emotional support for anyone, including carers." },
+];
+
+const resourceTool = String.raw`// Returns vetted Singapore resources matching the topic. The agent must cite only these ids.
+const RESOURCES = ${JSON.stringify(RESOURCES)};
+const q = String(query || '').toLowerCase();
+const hits = RESOURCES.filter(r => r.topics.some(t => q.includes(t)) || q.includes(r.id));
+return JSON.stringify((hits.length ? hits : RESOURCES).map(({ topics, ...r }) => r));`;
+
+const ADVISOR_SYSTEM = `You are Teman's healthcare advisor, with the practical knowledge of a community geriatric nurse in Singapore. A trend analyst has already reviewed an older adult's eating, mobility, helper notes and carer wellbeing. Your job is to turn that into a short, safe care plan for the family, the domestic helper and the GP.
+
+Rules:
+- Never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing any medication or dose. "Ask the GP whether a medication review is due" is fine.
+- Do not change the urgency you are given. If it is "urgent", the first family action is to call 995 if it is happening now, then see a doctor today.
+- Base every point on the numbers and notes provided. Use only the analyst's figures; do not recompute them.
+- Practical home actions only, suited to an HDB flat and a live-in helper: e.g. smaller, more frequent meals; favourite and soft foods; regular drinks; sitting up for meals; standing up slowly and sitting back down if dizzy; clear walkways, night lights, non-slip mats, someone nearby on walks; writing down when symptoms happen; protecting the helper's rest day.
+- GP checks are phrased as questions, e.g. "Is a lying and standing blood pressure check worthwhile given the dizziness?", "Would a nutrition screen such as MNA-SF help?", "Is a falls risk review due?".
+- Use the patient's medications list (senior.medications) and the camera's stand_findings. If she takes a blood-pressure medicine and notes mention dizziness or low fluid intake, include a GP check on standing blood pressure and on whether a medication review is due. If she pushed up with her hands, a falls-risk review question fits. Never name a medicine change.
+- Call the sg_care_resources tool to find support services. Only list resources whose id the tool returned; never write phone numbers yourself.
+- The helper text goes in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 steps.
+
+Return ONLY a JSON object with exactly these keys:
+{
+  "focus_areas": [{"area": "Eating", "why": "one sentence tied to the numbers", "family_actions": ["at most 3"], "helper_actions": ["at most 3, in English"]}],
+  "gp_checks": ["at most 4 questions for the GP"],
+  "escalation": {"see_gp": "now" | "within_3_days" | "next_routine_visit", "call_995_if": ["specific warning signs to watch for"]},
+  "helper_care_tips": "steps in the helper's language",
+  "helper_care_tips_en": "English translation of helper_care_tips",
+  "resources": [{"id": "aic", "why": "one sentence on why it helps this family"}]
+}`;
+
+const addCarePlan = String.raw`// Merge the advisor's care plan into the checked analysis, with the same kind of safety nets.
+const base = $('Parse and check').first().json;
+const raw = String($input.first().json.output || '').trim();
+let plan;
+try {
+  plan = JSON.parse(raw.replace(/^\x60{3}(?:json)?\s*/i, '').replace(/\x60{3}\s*$/, ''));
+} catch (e) {
+  plan = { parse_error: true, raw };
+}
+const RESOURCES = ${JSON.stringify(RESOURCES.map(({ id, name, contact, what }) => ({ id, name, contact, what })))};
+const byId = new Map(RESOURCES.map(r => [r.id, r]));
+// Only vetted resources survive, and their contact details come from the list, not the model.
+plan.resources = (Array.isArray(plan.resources) ? plan.resources : [])
+  .filter(r => r && byId.has(r.id))
+  .map(r => ({ ...byId.get(r.id), why: String(r.why || byId.get(r.id).what) }));
+// Escalation can never be softer than the checked urgency.
+const SEE = ['next_routine_visit', 'within_3_days', 'now'];
+const floor = { routine: 0, review_soon: 1, urgent: 2 }[base.urgency] ?? 1;
+plan.escalation = plan.escalation && typeof plan.escalation === 'object' ? plan.escalation : {};
+plan.escalation.see_gp = SEE[Math.max(floor, SEE.indexOf(plan.escalation.see_gp))];
+if (!Array.isArray(plan.escalation.call_995_if)) plan.escalation.call_995_if = [];
+if (base.urgency === 'urgent' && !plan.resources.some(r => r.id === 'emergency')) {
+  plan.resources.unshift({ ...byId.get('emergency'), why: 'A note mentions a red-flag sign. If it is happening now, call 995.' });
+}
+for (const k of ['focus_areas', 'gp_checks']) if (!Array.isArray(plan[k])) plan[k] = [];
+return [{ json: { ...base, care_plan: plan } }];`;
+
 const pg = { postgres: { id: "REPLACE_ME", name: "Teman Postgres" } };
-const node = (id, name, type, typeVersion, x, parameters, credentials) => ({
-  parameters, id, name, type, typeVersion, position: [x, 300], ...(credentials && { credentials }),
+const deepseek = { deepSeekApi: { id: "REPLACE_ME", name: "DeepSeek account" } };
+const node = (id, name, type, typeVersion, [x, y], parameters, credentials, extra) => ({
+  parameters, id, name, type, typeVersion, position: [x, y], ...(credentials && { credentials }), ...extra,
 });
+const chatModel = (id, name, x, options) =>
+  node(id, name, "@n8n/n8n-nodes-langchain.lmChatDeepSeek", 1, [x, 520],
+    { model: "deepseek-flash", options: { maxTokens: 8000, timeout: 90000, maxRetries: 2, ...options } }, deepseek);
+const agent = (id, name, x, text, systemMessage) =>
+  node(id, name, "@n8n/n8n-nodes-langchain.agent", 2.2, [x, 300],
+    { promptType: "define", text, options: { systemMessage, maxIterations: 6 } },
+    null, { retryOnFail: true, maxTries: 2 });
 
 const workflow = {
   name: "Teman – patient trend analysis",
   nodes: [
-    node("05598343-c3a9-402a-876a-e063b65c1f87", "Webhook", "n8n-nodes-base.webhook", 2, 0,
+    node("05598343-c3a9-402a-876a-e063b65c1f87", "Webhook", "n8n-nodes-base.webhook", 2, [0, 300],
       { httpMethod: "POST", path: "teman-analyse", authentication: "headerAuth", responseMode: "responseNode", options: {} },
       { httpHeaderAuth: { id: "REPLACE_ME", name: "Teman webhook secret" } }),
-    node("cb6ea61f-7b4d-4b4f-be0d-91a97a247b36", "Get patient data", "n8n-nodes-base.postgres", 2.5, 240,
+    node("cb6ea61f-7b4d-4b4f-be0d-91a97a247b36", "Get patient data", "n8n-nodes-base.postgres", 2.5, [240, 300],
       { operation: "executeQuery", query: QUERY, options: { queryReplacement: "={{ $json.body.senior_id }}" } }, pg),
-    node("dc5fcf4f-e542-4e0a-a631-198cce4fd8b2", "Compute baseline stats", "n8n-nodes-base.code", 2, 480, { jsCode: computeStats }),
-    node("1577a0d5-e632-469e-83f7-801410161bae", "DeepSeek analysis", "n8n-nodes-base.httpRequest", 4.2, 720,
-      {
-        method: "POST",
-        url: "https://api.deepseek.com/chat/completions",
-        authentication: "genericCredentialType",
-        genericAuthType: "httpHeaderAuth",
-        sendBody: true,
-        specifyBody: "json",
-        jsonBody:
-          "={{ JSON.stringify({ model: 'deepseek-flash', reasoning_effort: 'low', max_tokens: 8000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: " +
-          JSON.stringify(SYSTEM) +
-          " }, { role: 'user', content: 'Patient data and computed trend statistics:\\n' + JSON.stringify($json, null, 2) }] }) }}",
-        options: { timeout: 90000 },
-      },
-      { httpHeaderAuth: { id: "REPLACE_ME", name: "DeepSeek API key" } }),
-    node("d672fc01-6de8-4d14-b6c9-045f21e2a9cc", "Parse and check", "n8n-nodes-base.code", 2, 960, { jsCode: parseAndCheck }),
-    node("660bb2f1-c507-44f5-b09b-0ce196330eda", "Save analysis", "n8n-nodes-base.postgres", 2.5, 1200,
+    node("dc5fcf4f-e542-4e0a-a631-198cce4fd8b2", "Compute baseline stats", "n8n-nodes-base.code", 2, [480, 300], { jsCode: computeStats }),
+
+    // Agent 1: explains the computed trends for the GP, family and helper.
+    agent("1577a0d5-e632-469e-83f7-801410161bae", "Trend analyser agent", 720,
+      "={{ 'Patient data and computed trend statistics:\\n' + JSON.stringify($json, null, 2) }}", ANALYSER_SYSTEM),
+    chatModel("4b1e1c0a-6f2d-4c8e-9a51-2d7c3e8f0a11", "DeepSeek (analyser)", 640, { responseFormat: "json_object" }),
+
+    node("d672fc01-6de8-4d14-b6c9-045f21e2a9cc", "Parse and check", "n8n-nodes-base.code", 2, [1040, 300], { jsCode: parseAndCheck }),
+
+    // Agent 2: turns the checked analysis into a care plan, with a vetted resources tool.
+    agent("7f3a9d52-1b6e-4c0f-8e27-5a9b1c4d6e30", "Healthcare advisor agent", 1280,
+      "={{ 'Checked trend analysis (urgency is final):\\n' + JSON.stringify($json, null, 2) + '\\n\\nPatient data and statistics:\\n' + JSON.stringify($('Compute baseline stats').first().json, null, 2) }}",
+      ADVISOR_SYSTEM),
+    chatModel("a2c8e4f1-3d5b-4a7e-b9c0-6e1f2a3b4c5d", "DeepSeek (advisor)", 1200, { temperature: 0.3 }),
+    node("e5d7f9a1-2b4c-4d6e-8f0a-1b3c5d7e9f20", "SG care resources", "@n8n/n8n-nodes-langchain.toolCode", 1.1, [1400, 520], {
+      name: "sg_care_resources",
+      description: "Look up vetted Singapore health and caregiver support services. Input: a topic such as 'falls', 'nutrition', 'caregiver respite', 'helper rest day', 'confusion' or 'emergency'. Returns a JSON list of {id, name, contact, what}. Only cite ids returned here.",
+      jsCode: resourceTool,
+    }),
+
+    node("b8f0a2c4-6d8e-4f1a-9b3c-5d7e9f1a3b50", "Add care plan", "n8n-nodes-base.code", 2, [1600, 300], { jsCode: addCarePlan }),
+    node("660bb2f1-c507-44f5-b09b-0ce196330eda", "Save analysis", "n8n-nodes-base.postgres", 2.5, [1840, 300],
       {
         operation: "executeQuery",
         query: "INSERT INTO ai_analyses (senior_id, urgency, result)\nVALUES ($1, $2, $3::jsonb)\nRETURNING id, created_at;",
         options: { queryReplacement: "={{ [$json.senior_id, $json.urgency, JSON.stringify($json)] }}" },
       }, pg),
-    node("c9a2bec7-d886-4ec3-aff4-ec4283cc24d6", "Respond", "n8n-nodes-base.respondToWebhook", 1.1, 1440,
-      { respondWith: "json", responseBody: "={{ JSON.stringify($('Parse and check').first().json) }}", options: {} }),
+    node("c9a2bec7-d886-4ec3-aff4-ec4283cc24d6", "Respond", "n8n-nodes-base.respondToWebhook", 1.1, [2080, 300],
+      { respondWith: "json", responseBody: "={{ JSON.stringify($('Add care plan').first().json) }}", options: {} }),
   ],
   connections: {},
   settings: { executionOrder: "v1" },
   pinData: {},
 };
 
-const order = workflow.nodes.map((n) => n.name);
-for (let i = 0; i < order.length - 1; i++) {
-  workflow.connections[order[i]] = { main: [[{ node: order[i + 1], type: "main", index: 0 }]] };
-}
+const link = (from, to, type = "main") => {
+  workflow.connections[from] ??= {};
+  workflow.connections[from][type] = [[{ node: to, type, index: 0 }]];
+};
+const chain = ["Webhook", "Get patient data", "Compute baseline stats", "Trend analyser agent", "Parse and check",
+  "Healthcare advisor agent", "Add care plan", "Save analysis", "Respond"];
+for (let i = 0; i < chain.length - 1; i++) link(chain[i], chain[i + 1]);
+link("DeepSeek (analyser)", "Trend analyser agent", "ai_languageModel");
+link("DeepSeek (advisor)", "Healthcare advisor agent", "ai_languageModel");
+link("SG care resources", "Healthcare advisor agent", "ai_tool");
 
 writeFileSync(new URL("./teman-analysis-workflow.json", import.meta.url), JSON.stringify(workflow, null, 2) + "\n");
 console.log("wrote n8n/teman-analysis-workflow.json");
+

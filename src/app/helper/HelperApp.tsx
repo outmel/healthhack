@@ -3,9 +3,15 @@
 // Phone-first helper view: three big tasks, three languages, nothing to chat with.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DATE_LOCALE, DICTS, LANG_SHORT, SPEECH_LOCALE, type Dict, type Lang } from "@/lib/i18n";
+import type { SignalStatus } from "@/lib/baseline";
+import type { StandClip } from "@/lib/data";
+import { formatReps, type Track } from "@/lib/pose";
+import { agoLabel, sgToday } from "@/lib/format";
 import LogoutButton from "@/components/LogoutButton";
-import { Wordmark } from "@/components/Shell";
-import { Bulb, Camera, Chair, Check, ChevronLeft, ChevronRight, Mic, Phone, Play, Utensils } from "@/components/icons";
+import StandReplay from "@/components/StandReplay";
+import { StatusPill, Wordmark } from "@/components/Shell";
+import { Bulb, Calendar, Camera, Chair, Check, ChevronLeft, ChevronRight, Mic, Phone, Play, Users, Utensils } from "@/components/icons";
+import PoseStandTest, { type PoseResult } from "./PoseStandTest";
 
 type Screen = "home" | "meal" | "stand" | "voice";
 type Tip = { text: string; en: string } | null;
@@ -13,15 +19,23 @@ type Done = { meal: boolean; stand: boolean; voice: boolean; checkin: boolean };
 type IconT = (p: { className?: string }) => React.ReactElement;
 const TZ = "Asia/Singapore";
 const LANG_NAME: Record<Lang, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
+type Circle = { family: string; gp: string };
 
 export default function HelperApp({
-  name, seniorName, initialLang, initialDone, daysWithoutRest, tip,
-}: { name: string; seniorName: string; initialLang: Lang; initialDone: Done; daysWithoutRest: number | null; tip: Tip }) {
+  name, seniorName, initialLang, initialDone, daysWithoutRest, tip, checks: initialChecks, restDay, circle,
+}: {
+  name: string; seniorName: string; initialLang: Lang; initialDone: Done; daysWithoutRest: number | null; tip: Tip;
+  checks: number; restDay: { day: string; set_by: string } | null; circle: Circle;
+}) {
   const [lang, setLang] = useState<Lang>(initialLang in DICTS ? initialLang : "id");
   const [screen, setScreen] = useState<Screen>("home");
   const [done, setDone] = useState(initialDone);
   const t = DICTS[lang];
-  const markDone = (k: keyof Done) => setDone((d) => ({ ...d, [k]: true }));
+  const [checks, setChecks] = useState(initialChecks);
+  const markDone = (k: keyof Done) => {
+    setDone((d) => ({ ...d, [k]: true }));
+    if (k !== "checkin") setChecks((n) => n + 1);
+  };
   const back = () => {
     setScreen("home");
     window.scrollTo({ top: 0 });
@@ -67,7 +81,10 @@ export default function HelperApp({
             <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/20" aria-hidden>
               <div className="h-full rounded-full bg-turmeric transition-all" style={{ width: `${(count / 3) * 100}%` }} />
             </div>
-            <p className="mt-2 text-[15px] font-semibold">{count === 3 ? t.allDone : t.progress.replace("{n}", String(count))}</p>
+            <p className="mt-2 flex flex-wrap justify-between gap-x-3 text-[15px] font-semibold">
+              <span>{count === 3 ? t.allDone : t.progress.replace("{n}", String(count))}</span>
+              <span className="text-cream/80">{t.checksMonth.replace("{n}", String(checks))}</span>
+            </p>
           </>
         )}
       </header>
@@ -75,6 +92,14 @@ export default function HelperApp({
       <div className="flex flex-col gap-4 px-4 pt-5">
         {screen === "home" && (
           <>
+            {restDay && (
+              <p className="flex items-center gap-3 rounded-[22px] bg-rose-soft p-4 text-[17px] font-bold text-rose-deep">
+                <Calendar className="h-6 w-6 shrink-0 text-rose" />
+                {t.restDayBanner
+                  .replace("{day}", new Date(`${restDay.day}T12:00:00+08:00`).toLocaleDateString(DATE_LOCALE[lang], { weekday: "long", timeZone: TZ }))
+                  .replace("{name}", restDay.set_by)}
+              </p>
+            )}
             <section aria-label={t.todayTitle} className="flex flex-col gap-3">
               {tasks.map((k) => (
                 <TaskCard key={k.key} Icon={k.Icon} label={k.label} hint={k.hint} done={k.done} current={k.key === current} t={t} onClick={() => setScreen(k.key)} />
@@ -95,9 +120,9 @@ export default function HelperApp({
             <div className="flex justify-center"><LogoutButton /></div>
           </>
         )}
-        {screen === "meal" && <MealCapture t={t} onBack={back} onSaved={() => markDone("meal")} />}
-        {screen === "stand" && <StandTest t={t} onBack={back} onSaved={() => markDone("stand")} />}
-        {screen === "voice" && <VoiceNote t={t} lang={lang} onBack={back} onSaved={() => markDone("voice")} />}
+        {screen === "meal" && <MealCapture t={t} circle={circle} onBack={back} onSaved={() => markDone("meal")} />}
+        {screen === "stand" && <StandTest t={t} circle={circle} onBack={back} onSaved={() => markDone("stand")} />}
+        {screen === "voice" && <VoiceNote t={t} lang={lang} circle={circle} onBack={back} onSaved={() => markDone("voice")} />}
       </div>
 
       {/* Always reachable, never in the way. */}
@@ -160,21 +185,62 @@ function Screen({ title, Icon, onBack, t, children }: { title: string; Icon: Ico
 
 const primary = "min-h-14 w-full rounded-2xl bg-brand text-lg font-extrabold text-cream hover:bg-brand-dark disabled:bg-track disabled:text-faint";
 
-function Saved({ text, onBack }: { text: string; onBack: () => void }) {
+type Statuses = SignalStatus[] | undefined;
+type Compare = { level: "normal" | "watch" | null; text: string; key: string };
+
+/** How today compares with her own usual, in her helper's words (never colour alone). */
+function compareWith(statuses: Statuses, type: "meal" | "mobility", t: Dict): Compare {
+  const st = statuses?.find((x) => x.type === type);
+  if (!st) return { level: null, text: t.stillLearning, key: `${type}.ok` };
+  if (st.flagged) return { level: "watch", text: type === "meal" ? t.lessThanUsual : t.slowerThanUsual, key: `${type}.watch` };
+  return { level: "normal", text: t.likeUsual, key: `${type}.ok` };
+}
+
+/** After every check: what Teman saw, how it compares, one thing to do, and who can see it. */
+function ResultCard({
+  t, circle, saw, compare, action, footnote, onBack,
+}: {
+  t: Dict; circle: Circle; saw: React.ReactNode; compare?: Compare; action: string; footnote?: string; onBack: () => void;
+}) {
   return (
-    <div className="flex flex-col items-center gap-4 rounded-[22px] bg-brand-soft p-6 text-center text-brand-dark">
-      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-paper text-brand"><Check className="h-9 w-9" /></span>
-      <p className="text-xl font-bold">{text}</p>
+    <div className="flex flex-col gap-3">
+      <section className="rounded-[22px] border border-line bg-paper p-4">
+        <p className="eyebrow text-muted">{t.temanSaw}</p>
+        <div className="mt-2">{saw}</div>
+        {footnote && <p className="mt-2 text-sm text-muted">{footnote}</p>}
+      </section>
+      {compare && (
+        <section className="rounded-[22px] border border-line bg-paper p-4">
+          <p className="eyebrow text-muted">{t.comparedUsual}</p>
+          <div className="mt-2">
+            {compare.level ? (
+              <StatusPill level={compare.level} className="text-[17px]">{compare.text}</StatusPill>
+            ) : (
+              <p className="font-semibold text-muted">{compare.text}</p>
+            )}
+          </div>
+        </section>
+      )}
+      <section className="rounded-[22px] bg-sun-soft p-4 text-sun-deep">
+        <p className="eyebrow flex items-center gap-1.5 text-sun"><Bulb className="h-4 w-4" /> {t.oneThing}</p>
+        <p className="mt-1 text-[19px] font-bold leading-snug">{action}</p>
+      </section>
+      <p className="flex items-center justify-center gap-2 text-center font-semibold text-brand-dark">
+        <Users className="h-5 w-5 shrink-0" /> {t.canNowSee.replace("{family}", circle.family).replace("{gp}", circle.gp)}
+      </p>
       <button className={primary} onClick={onBack}>OK</button>
     </div>
   );
 }
 
-function MealCapture({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSaved: () => void }) {
+type Leftover = { label: string; box: [number, number, number, number] };
+type PlateResult = { bucket: number; confidence: "low" | "medium" | "high"; leftovers?: Leftover[]; status: SignalStatus | null };
+
+function MealCapture({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; onBack: () => void; onSaved: () => void }) {
   const [before, setBefore] = useState<File | null>(null);
   const [after, setAfter] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "busy" | "error">("idle");
-  const [result, setResult] = useState<{ bucket: number } | null>(null);
+  const [result, setResult] = useState<PlateResult | null>(null);
 
   async function submit() {
     if (!before || !after) return;
@@ -189,26 +255,70 @@ function MealCapture({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSa
     onSaved();
   }
 
+  if (result && after) {
+    const cmp = compareWith(result.status ? [result.status] : [], "meal", t);
+    // Boxes only when the model is confident and found something; never boxes that look wrong.
+    const boxes = result.confidence !== "low" ? (result.leftovers ?? []) : [];
+    return (
+      <Screen title={t.meal} Icon={Utensils} onBack={onBack} t={t}>
+        <ResultCard
+          t={t}
+          circle={circle}
+          saw={
+            <div className="flex flex-col items-center gap-2 text-center">
+              <LeftoverPhoto file={after} leftovers={boxes} label={t.wasLeft} />
+              <p className="mt-1 text-lg text-muted">{t.ate}</p>
+              <p className="text-6xl font-extrabold text-brand">{result.bucket}%</p>
+              <MealBar pct={result.bucket} />
+            </div>
+          }
+          footnote={t.photosNotStored}
+          compare={cmp}
+          action={t.actions[cmp.key]}
+          onBack={onBack}
+        />
+      </Screen>
+    );
+  }
+
   return (
     <Screen title={t.meal} Icon={Utensils} onBack={onBack} t={t}>
       <div className="grid grid-cols-2 gap-3">
         <PhotoPicker step={1} label={t.stepBefore} hint={t.takePhoto} file={before} onFile={setBefore} />
         <PhotoPicker step={2} label={t.stepAfter} hint={t.takePhoto} file={after} onFile={setAfter} />
       </div>
-      {result ? (
-        <div className="flex flex-col items-center gap-2 rounded-[22px] border border-line bg-paper p-6 text-center">
-          <p className="text-lg text-muted">{t.ate}</p>
-          <p className="text-6xl font-extrabold text-brand">{result.bucket}%</p>
-          <MealBar pct={result.bucket} />
-          <button className={`${primary} mt-3`} onClick={onBack}>{t.done}</button>
-        </div>
-      ) : (
-        <button className={primary} disabled={!before || !after || state === "busy"} onClick={submit}>
-          {state === "busy" ? t.working : t.estimate}
-        </button>
-      )}
+      <p className="text-center text-sm text-muted">{t.photosNotStored}</p>
+      <button className={primary} disabled={!before || !after || state === "busy"} onClick={submit}>
+        {state === "busy" ? t.working : t.estimate}
+      </button>
       {state === "error" && <p className="rounded-2xl bg-coral-soft p-3 text-center font-semibold text-coral">{t.failed}</p>}
     </Screen>
+  );
+}
+
+/** The after photo with soft amber boxes around what was left. The photo stays in memory only. */
+function LeftoverPhoto({ file, leftovers, label }: { file: File; leftovers: Leftover[]; label: string }) {
+  const url = useMemo(() => URL.createObjectURL(file), [file]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return (
+    <figure className="w-full">
+      <div className="relative overflow-hidden rounded-2xl">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={leftovers.length ? `${label}: ${leftovers.map((l) => l.label).join(", ")}` : label} className="block h-auto w-full" />
+        {leftovers.map((l, i) => (
+          <span
+            key={i}
+            className="absolute rounded-xl border-[3px] border-turmeric bg-turmeric/15"
+            style={{ left: `${l.box[0] * 100}%`, top: `${l.box[1] * 100}%`, width: `${l.box[2] * 100}%`, height: `${l.box[3] * 100}%` }}
+          >
+            <span className="absolute left-1 top-1 rounded-md bg-turmeric px-1.5 text-sm font-bold text-sun-deep">{l.label}</span>
+          </span>
+        ))}
+      </div>
+      {leftovers.length > 0 && (
+        <figcaption className="mt-1.5 text-left text-[15px] font-semibold text-sun">{label}: {leftovers.map((l) => l.label).join(", ")}</figcaption>
+      )}
+    </figure>
   );
 }
 
@@ -252,12 +362,119 @@ function PhotoPicker({ step, label, hint, file, onFile }: { step: number; label:
   );
 }
 
-// Tap-to-count fallback. Lane 2 replaces/extends this with the MediaPipe pose module.
-function StandTest({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSaved: () => void }) {
+type StandSaved = {
+  seconds: number;
+  method: "pose" | "tap";
+  findings: string[];
+  handReps: number[];
+  track: Track | null;
+  then: StandClip | null;
+  statuses: Statuses;
+};
+
+/** Chair-stand: the camera counts by default; tap-to-count stays one link away. */
+function StandTest({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; onBack: () => void; onSaved: () => void }) {
+  const [mode, setMode] = useState<"pose" | "tap">("pose");
+  const [saved, setSaved] = useState<StandSaved | null>(null);
+  const [state, setState] = useState<"idle" | "busy" | "error">("idle");
+  const [pending, setPending] = useState<Omit<StandSaved, "then" | "statuses"> & { meta: object } | null>(null);
+
+  async function save(r: NonNullable<typeof pending>) {
+    setPending(r);
+    setState("busy");
+    const res = await fetch("/api/observations", {
+      method: "POST",
+      body: JSON.stringify({ type: "mobility", value: r.seconds, meta: r.meta }),
+    }).catch(() => null);
+    if (!res?.ok) return setState("error");
+    const data = await res.json();
+    setSaved({ ...r, then: data.then ?? null, statuses: data.statuses });
+    setState("idle");
+    onSaved();
+  }
+
+  const fromPose = (p: PoseResult) =>
+    save({
+      seconds: p.seconds, method: "pose", findings: p.findings, handReps: p.handReps, track: p.track,
+      meta: { reps: p.reps, method: "pose", findings: p.findings, hand_reps: p.handReps, rep_times: p.repTimes, landmarks: p.track },
+    });
+  const fromTap = (seconds: number, reps: number) =>
+    save({ seconds, method: "tap", findings: [], handReps: [], track: null, meta: { reps, method: "tap" } });
+
+  if (saved) {
+    const cmp = compareWith(saved.statuses, "mobility", t);
+    const finding = saved.method === "pose" && (saved.findings.includes("used_hands") ? t.usedHands.replace("{reps}", formatReps(saved.handReps)) : t.noHands);
+    const debug = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+    return (
+      <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}>
+        <ResultCard
+          t={t}
+          circle={circle}
+          saw={
+            <div className="flex flex-col gap-3">
+              <p className="text-center">
+                <span className="text-6xl font-extrabold tabular-nums text-brand">{Math.round(saved.seconds)}</span>
+                <span className="text-lg text-muted"> {t.seconds}</span>
+              </p>
+              {finding && (
+                <p className={`rounded-2xl px-3 py-2 text-center text-[17px] font-bold ${saved.findings.length ? "bg-sun-soft text-sun-deep" : "bg-brand-soft text-brand-dark"}`}>
+                  {saved.findings.length ? "✋ " : "✓ "}{finding}
+                </p>
+              )}
+              {saved.track && saved.then?.track && (
+                <StandReplay
+                  then={{ seconds: saved.then.seconds, track: saved.then.track }}
+                  now={{ seconds: saved.seconds, track: saved.track }}
+                  thenLabel={agoLabel(saved.then.day, sgToday(), t)}
+                  nowLabel={t.today}
+                  replayLabel={t.replay}
+                  legend={t.ghostLegend}
+                  autoPlay
+                />
+              )}
+              {debug && saved.track && (
+                <a
+                  className="text-sm font-bold text-brand underline"
+                  download="stand-track.json"
+                  href={`data:application/json,${encodeURIComponent(JSON.stringify({ source: "recorded", seconds: saved.seconds, hand_reps: saved.handReps, findings: saved.findings, rep_times: [], track: saved.track }))}`}
+                >
+                  Download track
+                </a>
+              )}
+            </div>
+          }
+          footnote={saved.method === "pose" ? t.videoStays : undefined}
+          compare={cmp}
+          action={t.actions[cmp.key]}
+          onBack={onBack}
+        />
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}>
+      {state === "busy" ? (
+        <p className="rounded-[22px] bg-paper p-6 text-center text-lg font-bold text-muted ring-1 ring-line">{t.working}</p>
+      ) : state === "error" && pending ? (
+        <>
+          <p className="rounded-2xl bg-coral-soft p-3 text-center font-semibold text-coral">{t.failed}</p>
+          <button className={primary} onClick={() => save(pending)}>{t.tryAgain}</button>
+        </>
+      ) : mode === "pose" ? (
+        <PoseStandTest t={t} onResult={fromPose} onTapInstead={() => setMode("tap")} />
+      ) : (
+        <TapStandTest t={t} onDone={fromTap} />
+      )}
+    </Screen>
+  );
+}
+
+// Tap-to-count: the fallback when the camera can't see her clearly (or at the go/no-go).
+function TapStandTest({ t, onDone }: { t: Dict; onDone: (seconds: number, reps: number) => void }) {
   const [start, setStart] = useState<number | null>(null);
   const [reps, setReps] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
   const finished = reps >= 5;
 
@@ -267,19 +484,8 @@ function StandTest({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSave
     return () => clearInterval(timer.current);
   }, [start, finished]);
 
-  async function save() {
-    await fetch("/api/observations", {
-      method: "POST",
-      body: JSON.stringify({ type: "mobility", value: Math.round(elapsed * 10) / 10, meta: { reps, method: "tap" } }),
-    });
-    setSaved(true);
-    onSaved();
-  }
-
-  if (saved) return <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}><Saved text={t.saved} onBack={onBack} /></Screen>;
-
   return (
-    <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}>
+    <>
       {start === null && (
         <div className="rounded-[22px] bg-paper p-4 text-[17px] leading-snug text-body ring-1 ring-line">
           <p>{t.standIntro}</p>
@@ -304,16 +510,17 @@ function StandTest({ t, onBack, onSaved }: { t: Dict; onBack: () => void; onSave
           {t.tapEachStand}
         </button>
       ) : (
-        <button className={primary} onClick={save}>{t.save}</button>
+        <button className={primary} onClick={() => onDone(Math.round(elapsed * 10) / 10, reps)}>{t.save}</button>
       )}
-    </Screen>
+    </>
   );
 }
 
 type SpeechRec = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void; onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void; onend: () => void };
 
-function VoiceNote({ t, lang, onBack, onSaved }: { t: Dict; lang: Lang; onBack: () => void; onSaved: () => void }) {
+function VoiceNote({ t, lang, circle, onBack, onSaved }: { t: Dict; lang: Lang; circle: Circle; onBack: () => void; onSaved: () => void }) {
   const [text, setText] = useState("");
+  const [concerns, setConcerns] = useState<string[]>([]);
   const [listening, setListening] = useState(false);
   const [state, setState] = useState<"idle" | "busy" | "saved" | "error">("idle");
   const rec = useRef<SpeechRec | null>(null);
@@ -336,11 +543,36 @@ function VoiceNote({ t, lang, onBack, onSaved }: { t: Dict; lang: Lang; onBack: 
   async function save() {
     setState("busy");
     const res = await fetch("/api/observations", { method: "POST", body: JSON.stringify({ type: "voice", text, lang }) });
+    if (res.ok) setConcerns((await res.json()).concerns ?? []);
     setState(res.ok ? "saved" : "error");
     if (res.ok) onSaved();
   }
 
-  if (state === "saved") return <Screen title={t.voice} Icon={Mic} onBack={onBack} t={t}><Saved text={t.saved} onBack={onBack} /></Screen>;
+  if (state === "saved") {
+    return (
+      <Screen title={t.voice} Icon={Mic} onBack={onBack} t={t}>
+        <ResultCard
+          t={t}
+          circle={circle}
+          saw={
+            <div>
+              <p className="text-[17px] italic leading-snug text-body">“{text}”</p>
+              {concerns.length > 0 && (
+                <p className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-sun">{t.noteSaved}:</span>
+                  {concerns.map((c) => (
+                    <span key={c} className="rounded-full bg-sun-soft px-3 py-1 text-sm font-bold text-sun-deep">{c}</span>
+                  ))}
+                </p>
+              )}
+            </div>
+          }
+          action={t.actions[concerns.length ? "voice.concern" : "voice.ok"]}
+          onBack={onBack}
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen title={t.voice} Icon={Mic} onBack={onBack} t={t}>

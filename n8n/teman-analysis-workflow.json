@@ -27,7 +27,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT json_build_object(\n  'senior', (SELECT row_to_json(s) FROM seniors s WHERE s.id = $1),\n  'meals', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'meal' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) m),\n  'mobility', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) t),\n  'notes', (\n    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'original', original_text, 'translated', translated_text) ORDER BY created_at DESC)\n    FROM observations\n    WHERE senior_id = $1 AND type = 'voice' AND created_at > now() - interval '35 days'),\n  'carer', (\n    SELECT json_agg(json_build_object('date', (c.created_at AT TIME ZONE 'Asia/Singapore')::date, 'helper', u.name, 'language', u.language, 'mood', c.mood, 'rested_today', c.rested_today, 'note', c.note) ORDER BY c.created_at)\n    FROM carer_checkins c JOIN users u ON u.id = c.helper_id\n    WHERE u.household_id = (SELECT household_id FROM seniors WHERE id = $1)\n      AND c.created_at > now() - interval '35 days')\n) AS data;",
+        "query": "SELECT json_build_object(\n  'senior', (SELECT row_to_json(s) FROM seniors s WHERE s.id = $1),\n  'meals', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'meal' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) m),\n  'mobility', (\n    SELECT json_agg(json_build_object('date', d, 'value', v) ORDER BY d)\n    FROM (SELECT (created_at AT TIME ZONE 'Asia/Singapore')::date AS d, avg(value::numeric) AS v\n          FROM observations\n          WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'\n          GROUP BY 1) t),\n  'stand_tests', (\n    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'seconds', value,\n                                      'method', meta->>'method', 'findings', meta->'findings', 'hand_reps', meta->'hand_reps') ORDER BY created_at)\n    FROM observations\n    WHERE senior_id = $1 AND type = 'mobility' AND value IS NOT NULL AND created_at > now() - interval '35 days'),\n  'notes', (\n    SELECT json_agg(json_build_object('date', (created_at AT TIME ZONE 'Asia/Singapore')::date, 'original', original_text, 'translated', translated_text,\n                                      'concerns', COALESCE(meta->'concerns', '[]'::jsonb)) ORDER BY created_at DESC)\n    FROM observations\n    WHERE senior_id = $1 AND type = 'voice' AND created_at > now() - interval '35 days'),\n  'carer', (\n    SELECT json_agg(json_build_object('date', (c.created_at AT TIME ZONE 'Asia/Singapore')::date, 'helper', u.name, 'language', u.language, 'mood', c.mood, 'rested_today', c.rested_today, 'note', c.note) ORDER BY c.created_at)\n    FROM carer_checkins c JOIN users u ON u.id = c.helper_id\n    WHERE u.household_id = (SELECT household_id FROM seniors WHERE id = $1)\n      AND c.created_at > now() - interval '35 days')\n) AS data;",
         "options": {
           "queryReplacement": "={{ $json.body.senior_id }}"
         }
@@ -49,7 +49,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Deterministic stats: the AI explains the numbers, it never computes them.\n// Same rule as the app (src/lib/baseline.ts): 14-day baseline lagged 7 days, 3-day recent mean, flag at 1.5 SD.\nconst d = $input.first().json.data || {};\nconst seniorId = Number($('Webhook').first().json.body.senior_id);\nconst WINDOW = 14, RECENT = 3, LAG = 7, Z = 1.5;\nconst MIN_SD = { lower: 4, higher: 0.6 }; // meal %, chair-stand seconds\n\nfunction analyse(series, worseIs) {\n  const pts = (series || []).map(p => ({ date: p.date, v: Number(p.value) }));\n  if (pts.length < RECENT + 5) return { enough_data: false, days: pts.length };\n  const recent = pts.slice(-RECENT);\n  const end = pts.length - LAG;\n  const base = pts.slice(Math.max(0, end - WINDOW), end);\n  if (base.length < 5) return { enough_data: false, days: pts.length };\n  const mean = a => a.reduce((s, p) => s + p.v, 0) / a.length;\n  const bMean = mean(base);\n  const sd = Math.max(Math.sqrt(base.reduce((s, p) => s + (p.v - bMean) ** 2, 0) / Math.max(1, base.length - 1)), MIN_SD[worseIs]);\n  const rMean = mean(recent);\n  const z = (rMean - bMean) / sd;\n  const worse = worseIs === 'lower' ? z < -Z : z > Z;\n  // Onset: walk back from the latest day while each day is at least 1 SD in the worse direction.\n  let onset = null;\n  for (let i = pts.length - 1; i >= 0; i--) {\n    const dz = (pts[i].v - bMean) / sd;\n    if (!(worseIs === 'lower' ? dz < -1 : dz > 1)) break;\n    onset = pts[i].date;\n  }\n  return {\n    enough_data: true,\n    baseline_mean: +bMean.toFixed(1),\n    baseline_sd: +sd.toFixed(1),\n    recent_3day_mean: +rMean.toFixed(1),\n    change: +(rMean - bMean).toFixed(1),\n    z_score: +z.toFixed(2),\n    flagged: worse,\n    drift_started: onset,\n  };\n}\n\nconst meal = analyse(d.meals, 'lower');\nconst mobility = analyse(d.mobility, 'higher');\n\n// Red flags are matched in code too (English, Bahasa Indonesia, Tagalog), so urgency\n// never depends only on the model noticing them.\nconst RED_FLAGS = {\n  fall: /\\b(fell|fall(en)?|jatuh|nahulog|natumba)\\b/i,\n  'chest pain': /chest pain|nyeri dada|sakit dada|sakit sa dibdib/i,\n  breathlessness: /breathless|short(ness)? of breath|sesak( napas)?|hirap huminga/i,\n  'sudden confusion': /confus|bingung|linglong|nalilito/i,\n  'slurred speech': /slurred|pelo|bicara tidak jelas|utal/i,\n  fainting: /faint|pingsan|nawalan ng malay|hinimatay/i,\n  'hard to wake': /hard to wake|susah dibangunkan|mahirap gisingin/i,\n};\nconst notes = (d.notes || []).slice(0, 20);\nconst redFlagHits = [];\nfor (const n of notes) {\n  const text = (n.original || '') + ' ' + (n.translated || '');\n  for (const [flag, re] of Object.entries(RED_FLAGS)) if (re.test(text)) redFlagHits.push({ flag, date: n.date });\n}\n\nconst carer = d.carer || [];\nlet lastRest = null;\nfor (const c of carer) if (c.rested_today) lastRest = c.date;\nconst firstCheckin = carer.length ? carer[0].date : null;\nconst since = lastRest || firstCheckin;\nconst daysSinceRest = since ? Math.floor((Date.now() - new Date(since).getTime()) / 864e5) : null;\nconst recentMoods = carer.slice(-7).map(c => c.mood).filter(m => m != null);\n\nreturn [{ json: {\n  senior_id: seniorId,\n  senior: d.senior,\n  signals: { meal_intake_pct: meal, sit_to_stand_seconds: mobility },\n  combined_flag: !!(meal.flagged && mobility.flagged),\n  red_flag_hits: redFlagHits,\n  notes,\n  carer: {\n    helper: carer.length ? carer[carer.length - 1].helper : null,\n    language: carer.length ? carer[carer.length - 1].language : null,\n    days_since_rest_day: daysSinceRest,\n    rest_day_ever_recorded: !!lastRest,\n    avg_mood_last_7_days: recentMoods.length ? +(recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length).toFixed(1) : null,\n  },\n} }];"
+        "jsCode": "// Deterministic stats: the AI explains the numbers, it never computes them.\n// Same rule as the app (src/lib/baseline.ts): 14-day baseline lagged 7 days, 3-day recent mean, flag at 1.5 SD.\nconst d = $input.first().json.data || {};\nconst seniorId = Number($('Webhook').first().json.body.senior_id);\nconst WINDOW = 14, RECENT = 3, LAG = 7, Z = 1.5;\nconst MIN_SD = { lower: 4, higher: 0.6 }; // meal %, chair-stand seconds\n\nfunction analyse(series, worseIs) {\n  const pts = (series || []).map(p => ({ date: p.date, v: Number(p.value) }));\n  if (pts.length < RECENT + 5) return { enough_data: false, days: pts.length };\n  const recent = pts.slice(-RECENT);\n  const end = pts.length - LAG;\n  const base = pts.slice(Math.max(0, end - WINDOW), end);\n  if (base.length < 5) return { enough_data: false, days: pts.length };\n  const mean = a => a.reduce((s, p) => s + p.v, 0) / a.length;\n  const bMean = mean(base);\n  const sd = Math.max(Math.sqrt(base.reduce((s, p) => s + (p.v - bMean) ** 2, 0) / Math.max(1, base.length - 1)), MIN_SD[worseIs]);\n  const rMean = mean(recent);\n  const z = (rMean - bMean) / sd;\n  const worse = worseIs === 'lower' ? z < -Z : z > Z;\n  // Onset: walk back from the latest day while each day is at least 1 SD in the worse direction.\n  let onset = null;\n  for (let i = pts.length - 1; i >= 0; i--) {\n    const dz = (pts[i].v - bMean) / sd;\n    if (!(worseIs === 'lower' ? dz < -1 : dz > 1)) break;\n    onset = pts[i].date;\n  }\n  return {\n    enough_data: true,\n    baseline_mean: +bMean.toFixed(1),\n    baseline_sd: +sd.toFixed(1),\n    recent_3day_mean: +rMean.toFixed(1),\n    change: +(rMean - bMean).toFixed(1),\n    z_score: +z.toFixed(2),\n    flagged: worse,\n    drift_started: onset,\n  };\n}\n\nconst meal = analyse(d.meals, 'lower');\nconst mobility = analyse(d.mobility, 'higher');\n\n// What the on-device pose model noticed on each chair-stand (e.g. \"used_hands\" on reps 3-5).\nconst standFindings = (d.stand_tests || [])\n  .filter(t => Array.isArray(t.findings) && t.findings.length)\n  .map(t => ({ date: t.date, seconds: Number(t.seconds), findings: t.findings, hand_reps: t.hand_reps || [] }));\n\n// Red flags are matched in code too (English, Bahasa Indonesia, Tagalog), so urgency\n// never depends only on the model noticing them.\nconst RED_FLAGS = {\n  fall: /\\b(fell|fall(en)?|jatuh|nahulog|natumba)\\b/i,\n  'chest pain': /chest pain|nyeri dada|sakit dada|sakit sa dibdib/i,\n  breathlessness: /breathless|short(ness)? of breath|sesak( napas)?|hirap huminga/i,\n  'sudden confusion': /confus|bingung|linglong|nalilito/i,\n  'slurred speech': /slurred|pelo|bicara tidak jelas|utal/i,\n  fainting: /faint|pingsan|nawalan ng malay|hinimatay/i,\n  'hard to wake': /hard to wake|susah dibangunkan|mahirap gisingin/i,\n};\nconst notes = (d.notes || []).slice(0, 20);\nconst redFlagHits = [];\nfor (const n of notes) {\n  const text = (n.original || '') + ' ' + (n.translated || '');\n  for (const [flag, re] of Object.entries(RED_FLAGS)) if (re.test(text)) redFlagHits.push({ flag, date: n.date });\n}\n\nconst carer = d.carer || [];\nlet lastRest = null;\nfor (const c of carer) if (c.rested_today) lastRest = c.date;\nconst firstCheckin = carer.length ? carer[0].date : null;\nconst since = lastRest || firstCheckin;\nconst daysSinceRest = since ? Math.floor((Date.now() - new Date(since).getTime()) / 864e5) : null;\nconst recentMoods = carer.slice(-7).map(c => c.mood).filter(m => m != null);\n\nreturn [{ json: {\n  senior_id: seniorId,\n  senior: d.senior,\n  signals: { meal_intake_pct: meal, sit_to_stand_seconds: mobility },\n  combined_flag: !!(meal.flagged && mobility.flagged),\n  medications: (d.senior && d.senior.medications) || [],\n  stand_findings: standFindings,\n  red_flag_hits: redFlagHits,\n  notes,\n  carer: {\n    helper: carer.length ? carer[carer.length - 1].helper : null,\n    language: carer.length ? carer[carer.length - 1].language : null,\n    days_since_rest_day: daysSinceRest,\n    rest_day_ever_recorded: !!lastRest,\n    avg_mood_last_7_days: recentMoods.length ? +(recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length).toFixed(1) : null,\n  },\n} }];"
       },
       "id": "dc5fcf4f-e542-4e0a-a631-198cce4fd8b2",
       "name": "Compute baseline stats",
@@ -62,42 +62,132 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.deepseek.com/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'deepseek-flash', reasoning_effort: 'low', max_tokens: 8000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: \"You are Teman's care-trend analyst. You support a GP, a family and a domestic helper caring for a frail older adult in Singapore.\\n\\nRules:\\n- You flag trends and suggest who should look at what. You never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing medication.\\n- Use only the numbers provided. Do not recompute or invent figures.\\n- Treat helper notes as observations, not facts. Quote dates when you refer to them.\\n- If any note mentions a fall, chest pain, breathlessness, sudden confusion, slurred speech, fainting or being hard to wake, set urgency to \\\"urgent\\\" and tell the family to call 995.\\n- Write the helper message in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 practical steps.\\n\\nReturn ONLY a JSON object with exactly these keys:\\n{\\n  \\\"urgency\\\": \\\"routine\\\" | \\\"review_soon\\\" | \\\"urgent\\\",\\n  \\\"headline\\\": \\\"one plain sentence for the GP, under 20 words\\\",\\n  \\\"gp_summary\\\": \\\"3-5 sentences for the GP: what changed, since when, by how much, and what the notes add\\\",\\n  \\\"symptom_tags\\\": [{\\\"tag\\\": \\\"Dizziness\\\", \\\"count\\\": 3, \\\"dates\\\": [\\\"2026-10-11\\\"]}],\\n  \\\"worth_reviewing\\\": [\\\"short items a GP may want to check, phrased as questions, no diagnoses\\\"],\\n  \\\"red_flags\\\": [\\\"any red-flag phrases found in notes, empty if none\\\"],\\n  \\\"family_message\\\": \\\"2-3 kind sentences for the family in English, with one clear next step\\\",\\n  \\\"helper_message\\\": \\\"message in the helper's language\\\",\\n  \\\"helper_message_en\\\": \\\"English translation of helper_message\\\",\\n  \\\"carer_wellbeing\\\": \\\"one sentence about the helper's own wellbeing, or empty string\\\"\\n}\" }, { role: 'user', content: 'Patient data and computed trend statistics:\\n' + JSON.stringify($json, null, 2) }] }) }}",
+        "promptType": "define",
+        "text": "={{ 'Patient data and computed trend statistics:\\n' + JSON.stringify($json, null, 2) }}",
         "options": {
-          "timeout": 90000
+          "systemMessage": "You are Teman's care-trend analyst. You support a GP, a family and a domestic helper caring for a frail older adult in Singapore.\n\nRules:\n- You flag trends and suggest who should look at what. You never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing medication.\n- Use only the numbers provided. Do not recompute or invent figures.\n- Treat helper notes as observations, not facts. Quote dates when you refer to them.\n- Each note may carry \"concerns\" picked out at translation (e.g. \"low fluid intake\", \"dizziness on standing\"). Include them in symptom_tags, merged with what you find in the text.\n- stand_findings are what the on-device pose model saw during the chair-stand test: \"used_hands\" means she pushed up with her hands (hand_reps = which of the 5 stands). Mention it in gp_summary when present; it is an observation, not a diagnosis.\n- medications lists her current medicines. If she takes a blood-pressure medicine and the notes mention dizziness on standing or drinking little, a worth_reviewing item may ask whether a lying and standing blood pressure check and a medication review are due. Never suggest starting, stopping or changing a medicine.\n- If any note mentions a fall, chest pain, breathlessness, sudden confusion, slurred speech, fainting or being hard to wake, set urgency to \"urgent\" and tell the family to call 995.\n- Write the helper message in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 practical steps.\n\nReturn ONLY a JSON object with exactly these keys:\n{\n  \"urgency\": \"routine\" | \"review_soon\" | \"urgent\",\n  \"headline\": \"one plain sentence for the GP, under 20 words\",\n  \"gp_summary\": \"3-5 sentences for the GP: what changed, since when, by how much, and what the notes add\",\n  \"symptom_tags\": [{\"tag\": \"Dizziness\", \"count\": 3, \"dates\": [\"2026-10-11\"]}],\n  \"worth_reviewing\": [\"short items a GP may want to check, phrased as questions, no diagnoses\"],\n  \"red_flags\": [\"any red-flag phrases found in notes, empty if none\"],\n  \"family_message\": \"2-3 kind sentences for the family in English, with one clear next step\",\n  \"helper_message\": \"message in the helper's language\",\n  \"helper_message_en\": \"English translation of helper_message\",\n  \"carer_wellbeing\": \"one sentence about the helper's own wellbeing, or empty string\"\n}",
+          "maxIterations": 6
         }
       },
       "id": "1577a0d5-e632-469e-83f7-801410161bae",
-      "name": "DeepSeek analysis",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "Trend analyser agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
       "position": [
         720,
         300
       ],
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "model": "deepseek-flash",
+        "options": {
+          "maxTokens": 8000,
+          "timeout": 90000,
+          "maxRetries": 2,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "4b1e1c0a-6f2d-4c8e-9a51-2d7c3e8f0a11",
+      "name": "DeepSeek (analyser)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        640,
+        520
+      ],
       "credentials": {
-        "httpHeaderAuth": {
+        "deepSeekApi": {
           "id": "REPLACE_ME",
-          "name": "DeepSeek API key"
+          "name": "DeepSeek account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const stats = $('Compute baseline stats').first().json;\nconst raw = ($input.first().json.choices?.[0]?.message?.content || '').trim();\nlet analysis;\ntry {\n  analysis = JSON.parse(raw.replace(/^\\x60{3}(?:json)?\\s*/i, '').replace(/\\x60{3}\\s*$/, ''));\n} catch (e) {\n  analysis = { urgency: 'review_soon', headline: 'AI analysis could not be parsed; review the raw trends.', parse_error: true, raw };\n}\nconst LEVELS = ['routine', 'review_soon', 'urgent'];\nif (!LEVELS.includes(analysis.urgency)) analysis.urgency = 'review_soon';\n// Safety nets: the model can raise urgency but never lower it below what the code found.\nif (stats.combined_flag && analysis.urgency === 'routine') analysis.urgency = 'review_soon';\nif (stats.red_flag_hits.length) {\n  analysis.urgency = 'urgent';\n  const found = [...new Set(stats.red_flag_hits.map(h => h.flag + ' (' + h.date + ')'))];\n  analysis.red_flags = [...new Set([...(analysis.red_flags || []), ...found])];\n  if (!/995/.test(analysis.family_message || '')) {\n    analysis.family_message = 'A note mentions ' + found.join(', ') + '. If this is happening now, call 995. ' + (analysis.family_message || '');\n  }\n}\nreturn [{ json: {\n  senior_id: stats.senior_id,\n  generated_at: new Date().toISOString(),\n  urgency: analysis.urgency,\n  stats: stats.signals,\n  carer: stats.carer,\n  analysis,\n} }];"
+        "jsCode": "const stats = $('Compute baseline stats').first().json;\nconst raw = String($input.first().json.output || '').trim();\nlet analysis;\ntry {\n  analysis = JSON.parse(raw.replace(/^\\x60{3}(?:json)?\\s*/i, '').replace(/\\x60{3}\\s*$/, ''));\n} catch (e) {\n  analysis = { urgency: 'review_soon', headline: 'AI analysis could not be parsed; review the raw trends.', parse_error: true, raw };\n}\nconst LEVELS = ['routine', 'review_soon', 'urgent'];\nif (!LEVELS.includes(analysis.urgency)) analysis.urgency = 'review_soon';\n// Safety nets: the model can raise urgency but never lower it below what the code found.\nif (stats.combined_flag && analysis.urgency === 'routine') analysis.urgency = 'review_soon';\nif (stats.red_flag_hits.length) {\n  analysis.urgency = 'urgent';\n  const found = [...new Set(stats.red_flag_hits.map(h => h.flag + ' (' + h.date + ')'))];\n  analysis.red_flags = [...new Set([...(analysis.red_flags || []), ...found])];\n  if (!/995/.test(analysis.family_message || '')) {\n    analysis.family_message = 'A note mentions ' + found.join(', ') + '. If this is happening now, call 995. ' + (analysis.family_message || '');\n  }\n}\nreturn [{ json: {\n  senior_id: stats.senior_id,\n  generated_at: new Date().toISOString(),\n  urgency: analysis.urgency,\n  stats: stats.signals,\n  carer: stats.carer,\n  analysis,\n} }];"
       },
       "id": "d672fc01-6de8-4d14-b6c9-045f21e2a9cc",
       "name": "Parse and check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        960,
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'Checked trend analysis (urgency is final):\\n' + JSON.stringify($json, null, 2) + '\\n\\nPatient data and statistics:\\n' + JSON.stringify($('Compute baseline stats').first().json, null, 2) }}",
+        "options": {
+          "systemMessage": "You are Teman's healthcare advisor, with the practical knowledge of a community geriatric nurse in Singapore. A trend analyst has already reviewed an older adult's eating, mobility, helper notes and carer wellbeing. Your job is to turn that into a short, safe care plan for the family, the domestic helper and the GP.\n\nRules:\n- Never diagnose, never name a likely cause as fact, and never suggest starting, stopping or changing any medication or dose. \"Ask the GP whether a medication review is due\" is fine.\n- Do not change the urgency you are given. If it is \"urgent\", the first family action is to call 995 if it is happening now, then see a doctor today.\n- Base every point on the numbers and notes provided. Use only the analyst's figures; do not recompute them.\n- Practical home actions only, suited to an HDB flat and a live-in helper: e.g. smaller, more frequent meals; favourite and soft foods; regular drinks; sitting up for meals; standing up slowly and sitting back down if dizzy; clear walkways, night lights, non-slip mats, someone nearby on walks; writing down when symptoms happen; protecting the helper's rest day.\n- GP checks are phrased as questions, e.g. \"Is a lying and standing blood pressure check worthwhile given the dizziness?\", \"Would a nutrition screen such as MNA-SF help?\", \"Is a falls risk review due?\".\n- Use the patient's medications list (senior.medications) and the camera's stand_findings. If she takes a blood-pressure medicine and notes mention dizziness or low fluid intake, include a GP check on standing blood pressure and on whether a medication review is due. If she pushed up with her hands, a falls-risk review question fits. Never name a medicine change.\n- Call the sg_care_resources tool to find support services. Only list resources whose id the tool returned; never write phone numbers yourself.\n- The helper text goes in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 steps.\n\nReturn ONLY a JSON object with exactly these keys:\n{\n  \"focus_areas\": [{\"area\": \"Eating\", \"why\": \"one sentence tied to the numbers\", \"family_actions\": [\"at most 3\"], \"helper_actions\": [\"at most 3, in English\"]}],\n  \"gp_checks\": [\"at most 4 questions for the GP\"],\n  \"escalation\": {\"see_gp\": \"now\" | \"within_3_days\" | \"next_routine_visit\", \"call_995_if\": [\"specific warning signs to watch for\"]},\n  \"helper_care_tips\": \"steps in the helper's language\",\n  \"helper_care_tips_en\": \"English translation of helper_care_tips\",\n  \"resources\": [{\"id\": \"aic\", \"why\": \"one sentence on why it helps this family\"}]\n}",
+          "maxIterations": 6
+        }
+      },
+      "id": "7f3a9d52-1b6e-4c0f-8e27-5a9b1c4d6e30",
+      "name": "Healthcare advisor agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "model": "deepseek-flash",
+        "options": {
+          "maxTokens": 8000,
+          "timeout": 90000,
+          "maxRetries": 2,
+          "temperature": 0.3
+        }
+      },
+      "id": "a2c8e4f1-3d5b-4a7e-b9c0-6e1f2a3b4c5d",
+      "name": "DeepSeek (advisor)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        520
+      ],
+      "credentials": {
+        "deepSeekApi": {
+          "id": "REPLACE_ME",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "sg_care_resources",
+        "description": "Look up vetted Singapore health and caregiver support services. Input: a topic such as 'falls', 'nutrition', 'caregiver respite', 'helper rest day', 'confusion' or 'emergency'. Returns a JSON list of {id, name, contact, what}. Only cite ids returned here.",
+        "jsCode": "// Returns vetted Singapore resources matching the topic. The agent must cite only these ids.\nconst RESOURCES = [{\"id\":\"emergency\",\"name\":\"SCDF emergency ambulance\",\"contact\":\"995\",\"topics\":[\"emergency\",\"fall\",\"chest pain\",\"breathless\",\"faint\",\"stroke\",\"confusion\",\"unresponsive\"],\"what\":\"Life-threatening emergencies, any time.\"},{\"id\":\"non_emergency_ambulance\",\"name\":\"Non-emergency ambulance\",\"contact\":\"1777\",\"topics\":[\"transport\",\"non-urgent\",\"hospital\"],\"what\":\"Transport to hospital when it is not an emergency.\"},{\"id\":\"aic\",\"name\":\"Agency for Integrated Care (AIC) hotline\",\"contact\":\"1800 650 6060\",\"topics\":[\"caregiver\",\"respite\",\"home care\",\"day care\",\"nursing\",\"subsidy\",\"meals\",\"rehab\",\"mobility\",\"falls\",\"nutrition\"],\"what\":\"Home care, day care, respite and caregiver support schemes.\"},{\"id\":\"healthhub\",\"name\":\"HealthHub\",\"contact\":\"healthhub.sg\",\"topics\":[\"gp\",\"polyclinic\",\"appointment\",\"records\",\"booking\",\"health information\"],\"what\":\"Book polyclinic appointments and read trusted health information.\"},{\"id\":\"dementia_sg\",\"name\":\"Dementia Singapore helpline\",\"contact\":\"6377 0700\",\"topics\":[\"memory\",\"confusion\",\"dementia\",\"behaviour\"],\"what\":\"Advice when memory or behaviour changes.\"},{\"id\":\"cde\",\"name\":\"Centre for Domestic Employees (CDE) helpline\",\"contact\":\"1800 2255 233\",\"topics\":[\"helper\",\"domestic worker\",\"rest day\",\"carer\",\"wellbeing\"],\"what\":\"Support for domestic helpers, including rest-day and wellbeing concerns.\"},{\"id\":\"sos\",\"name\":\"Samaritans of Singapore (SOS)\",\"contact\":\"1767\",\"topics\":[\"distress\",\"mood\",\"stress\",\"burnout\",\"carer\",\"emotional\"],\"what\":\"24-hour emotional support for anyone, including carers.\"}];\nconst q = String(query || '').toLowerCase();\nconst hits = RESOURCES.filter(r => r.topics.some(t => q.includes(t)) || q.includes(r.id));\nreturn JSON.stringify((hits.length ? hits : RESOURCES).map(({ topics, ...r }) => r));"
+      },
+      "id": "e5d7f9a1-2b4c-4d6e-8f0a-1b3c5d7e9f20",
+      "name": "SG care resources",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the advisor's care plan into the checked analysis, with the same kind of safety nets.\nconst base = $('Parse and check').first().json;\nconst raw = String($input.first().json.output || '').trim();\nlet plan;\ntry {\n  plan = JSON.parse(raw.replace(/^\\x60{3}(?:json)?\\s*/i, '').replace(/\\x60{3}\\s*$/, ''));\n} catch (e) {\n  plan = { parse_error: true, raw };\n}\nconst RESOURCES = [{\"id\":\"emergency\",\"name\":\"SCDF emergency ambulance\",\"contact\":\"995\",\"what\":\"Life-threatening emergencies, any time.\"},{\"id\":\"non_emergency_ambulance\",\"name\":\"Non-emergency ambulance\",\"contact\":\"1777\",\"what\":\"Transport to hospital when it is not an emergency.\"},{\"id\":\"aic\",\"name\":\"Agency for Integrated Care (AIC) hotline\",\"contact\":\"1800 650 6060\",\"what\":\"Home care, day care, respite and caregiver support schemes.\"},{\"id\":\"healthhub\",\"name\":\"HealthHub\",\"contact\":\"healthhub.sg\",\"what\":\"Book polyclinic appointments and read trusted health information.\"},{\"id\":\"dementia_sg\",\"name\":\"Dementia Singapore helpline\",\"contact\":\"6377 0700\",\"what\":\"Advice when memory or behaviour changes.\"},{\"id\":\"cde\",\"name\":\"Centre for Domestic Employees (CDE) helpline\",\"contact\":\"1800 2255 233\",\"what\":\"Support for domestic helpers, including rest-day and wellbeing concerns.\"},{\"id\":\"sos\",\"name\":\"Samaritans of Singapore (SOS)\",\"contact\":\"1767\",\"what\":\"24-hour emotional support for anyone, including carers.\"}];\nconst byId = new Map(RESOURCES.map(r => [r.id, r]));\n// Only vetted resources survive, and their contact details come from the list, not the model.\nplan.resources = (Array.isArray(plan.resources) ? plan.resources : [])\n  .filter(r => r && byId.has(r.id))\n  .map(r => ({ ...byId.get(r.id), why: String(r.why || byId.get(r.id).what) }));\n// Escalation can never be softer than the checked urgency.\nconst SEE = ['next_routine_visit', 'within_3_days', 'now'];\nconst floor = { routine: 0, review_soon: 1, urgent: 2 }[base.urgency] ?? 1;\nplan.escalation = plan.escalation && typeof plan.escalation === 'object' ? plan.escalation : {};\nplan.escalation.see_gp = SEE[Math.max(floor, SEE.indexOf(plan.escalation.see_gp))];\nif (!Array.isArray(plan.escalation.call_995_if)) plan.escalation.call_995_if = [];\nif (base.urgency === 'urgent' && !plan.resources.some(r => r.id === 'emergency')) {\n  plan.resources.unshift({ ...byId.get('emergency'), why: 'A note mentions a red-flag sign. If it is happening now, call 995.' });\n}\nfor (const k of ['focus_areas', 'gp_checks']) if (!Array.isArray(plan[k])) plan[k] = [];\nreturn [{ json: { ...base, care_plan: plan } }];"
+      },
+      "id": "b8f0a2c4-6d8e-4f1a-9b3c-5d7e9f1a3b50",
+      "name": "Add care plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
         300
       ]
     },
@@ -114,7 +204,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1200,
+        1840,
         300
       ],
       "credentials": {
@@ -127,7 +217,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($('Parse and check').first().json) }}",
+        "responseBody": "={{ JSON.stringify($('Add care plan').first().json) }}",
         "options": {}
       },
       "id": "c9a2bec7-d886-4ec3-aff4-ec4283cc24d6",
@@ -135,7 +225,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1440,
+        2080,
         300
       ]
     }
@@ -167,14 +257,14 @@
       "main": [
         [
           {
-            "node": "DeepSeek analysis",
+            "node": "Trend analyser agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "DeepSeek analysis": {
+    "Trend analyser agent": {
       "main": [
         [
           {
@@ -186,6 +276,28 @@
       ]
     },
     "Parse and check": {
+      "main": [
+        [
+          {
+            "node": "Healthcare advisor agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Healthcare advisor agent": {
+      "main": [
+        [
+          {
+            "node": "Add care plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add care plan": {
       "main": [
         [
           {
@@ -202,6 +314,39 @@
           {
             "node": "Respond",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek (analyser)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Trend analyser agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek (advisor)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Healthcare advisor agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SG care resources": {
+      "ai_tool": [
+        [
+          {
+            "node": "Healthcare advisor agent",
+            "type": "ai_tool",
             "index": 0
           }
         ]

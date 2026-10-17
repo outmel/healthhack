@@ -54,6 +54,64 @@ export function evaluateSignal(type: Signal, daily: DailyPoint[]): SignalStatus 
   return { type, mean: m, sd: s, recent: r, z, flagged: z * BAD_DIRECTION[type] > Z_THRESHOLD };
 }
 
+/** The 14 days evaluateSignal uses as "her usual" (lagged by LAG_DAYS). */
+export function baselineWindow(daily: DailyPoint[]): DailyPoint[] {
+  const end = daily.length - LAG_DAYS;
+  return daily.slice(Math.max(0, end - WINDOW_DAYS), Math.max(0, end));
+}
+
+// ---- Lead time: how early Teman noticed. Pure functions over the same daily series. ----
+
+/**
+ * First day of the latest run of flagged days: replay evaluateSignal on daily.slice(0, i) for
+ * each day i, as if the engine ran that evening. With one decline in the data (the seed), this
+ * is simply the first day it flags. Null if the signal has never flagged.
+ */
+export function firstFlag(type: Signal, daily: DailyPoint[]): string | null {
+  const flagged = daily.map((_, i) => !!evaluateSignal(type, daily.slice(0, i + 1))?.flagged);
+  let i = flagged.lastIndexOf(true);
+  if (i < 0) return null;
+  while (i > 0 && flagged[i - 1]) i--;
+  return daily[i].day;
+}
+
+/**
+ * When the change began: the first day of the unbroken run of readings outside her usual band
+ * (baseline mean ± Z_THRESHOLD·SD, bad side) that ends at the flag day.
+ */
+export function driftStart(type: Signal, daily: DailyPoint[]): string | null {
+  const flag = firstFlag(type, daily);
+  if (!flag) return null;
+  const f = daily.findIndex((p) => p.day === flag);
+  const st = evaluateSignal(type, daily.slice(0, f + 1));
+  if (!st) return null;
+  const outside = (v: number) => (v - st.mean) * BAD_DIRECTION[type] > Z_THRESHOLD * st.sd;
+  let start: string | null = null;
+  for (let i = f; i >= 0 && outside(daily[i].value); i--) start = daily[i].day;
+  return start ?? flag;
+}
+
+/** First day both signals were flagged at once: the day the family was alerted. */
+export function combinedAlertDay(series: Record<Signal, DailyPoint[]>): string | null {
+  const days = [...new Set(SIGNALS.flatMap((t) => series[t].map((p) => p.day)))].sort();
+  for (const d of days) {
+    if (SIGNALS.every((t) => evaluateSignal(t, series[t].filter((p) => p.day <= d))?.flagged)) return d;
+  }
+  return null;
+}
+
+export type LeadTime = { driftStart: string | null; flagged: string | null; alerted: string | null };
+
+/** Earliest drift start and flag across signals, plus the combined alert day. */
+export function leadTime(series: Record<Signal, DailyPoint[]>): LeadTime {
+  const min = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
+  return {
+    driftStart: min(SIGNALS.map((t) => driftStart(t, series[t]))),
+    flagged: min(SIGNALS.map((t) => firstFlag(t, series[t]))),
+    alerted: combinedAlertDay(series),
+  };
+}
+
 type Db = Pick<PoolClient, "query">;
 
 export async function dailySeries(db: Db, seniorId: number, type: Signal): Promise<DailyPoint[]> {

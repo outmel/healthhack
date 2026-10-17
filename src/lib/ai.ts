@@ -7,11 +7,29 @@ const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-flash";
 let client: OpenAI | undefined;
 const getClient = () => (client ??= new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: "https://api.deepseek.com" }));
 
+const Box = z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]);
 const PlateEstimate = z.object({
   percent_eaten: z.coerce.number().min(0).max(100),
   confidence: z.enum(["low", "medium", "high"]),
   note: z.string(),
+  // Food left on the AFTER photo, boxes as [x, y, w, h] in 0-1 image coordinates.
+  leftovers: z
+    .array(z.object({ label: z.string(), box: Box }))
+    .catch([]) // missing or malformed boxes -> none, never a failed estimate
+    .transform((xs) =>
+      xs
+        .map((l) => ({ label: l.label.trim().toLowerCase(), box: clampBox(l.box) }))
+        .filter((l) => l.label && l.box[2] > 0.02 && l.box[3] > 0.02)
+        .slice(0, 6),
+    ),
 });
+
+/** Keep boxes inside the photo; a box that spills off the edge is trimmed, not trusted blindly. */
+function clampBox([x, y, w, h]: [number, number, number, number]): [number, number, number, number] {
+  const c = (v: number) => Math.min(1, Math.max(0, v));
+  const x0 = c(x), y0 = c(y);
+  return [x0, y0, c(x + w) - x0, c(y + h) - y0];
+}
 export type PlateEstimate = z.infer<typeof PlateEstimate>;
 
 const Translation = z.object({
@@ -43,7 +61,7 @@ export async function estimatePlate(before: Img, after: Img): Promise<PlateEstim
     {
       role: "system",
       content:
-        'You estimate how much of a meal an elderly person ate from before/after photos. Reply with JSON only: {"percent_eaten": number 0-100, "confidence": "low" | "medium" | "high", "note": "one short sentence on what was left"}.',
+        'You estimate how much of a meal an elderly person ate from before/after photos. Reply with JSON only: {"percent_eaten": number 0-100, "confidence": "low" | "medium" | "high", "note": "one short sentence on what was left", "leftovers": [{"label": "rice", "box": [x, y, w, h]}]}. Boxes are on the AFTER photo, as fractions 0-1 of its width and height, x,y = top-left corner.',
     },
     {
       role: "user",
@@ -54,7 +72,7 @@ export async function estimatePlate(before: Img, after: Img): Promise<PlateEstim
         { type: "image_url", image_url: { url: url(after) } },
         {
           type: "text",
-          text: "Estimate what percentage of the food (by volume) was eaten. Ignore garnish, bones and inedible items. If the photos don't show the same meal, say so in the note and use low confidence.",
+          text: "Estimate what percentage of the food (by volume) was eaten. Ignore garnish, bones and inedible items. If the photos don't show the same meal, say so in the note and use low confidence. In leftovers, draw one tight box around each food that was not eaten on the AFTER photo, labelled in one or two plain English words; use [] if the plate is clean or you are unsure where the food is.",
         },
       ],
     },

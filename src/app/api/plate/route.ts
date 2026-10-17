@@ -1,4 +1,5 @@
-// Before/after plate photos -> % eaten. Saves a meal observation and re-runs the engine.
+// Before/after plate photos -> % eaten + boxes around what was left. Saves a meal observation
+// and re-runs the engine. Photos are kept in memory only; they are never stored.
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
@@ -33,6 +34,6 @@ export async function POST(req: Request) {
   await query(`INSERT INTO observations (senior_id, type, value, meta) VALUES ($1, 'meal', $2, $3)`, [
     senior.id, Math.round(estimate.percent_eaten), { confidence: estimate.confidence, note: estimate.note, bucket },
   ]);
-  await recompute(senior.id);
-  return NextResponse.json({ ...estimate, bucket });
+  const statuses = await recompute(senior.id);
+  return NextResponse.json({ ...estimate, bucket, status: statuses.find((x) => x.type === "meal") ?? null });
 }

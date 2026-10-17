@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# MediaPipe WASM is copied from node_modules on install (scripts/copy-mediapipe.mjs)
+/public/mediapipe/wasm/

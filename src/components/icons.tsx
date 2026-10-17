@@ -162,3 +162,26 @@ export const Logo = ({ className = "h-10 w-10" }: P) => (
     <path d="M20 15v16" fill="none" stroke="#FBF6EC" strokeWidth="2.4" strokeLinecap="round" />
   </svg>
 );
+
+export const Standing = ({ className }: P) => (
+  <svg {...base(className)}>
+    <circle cx="12" cy="4" r="2" />
+    <path d="M12 7v7M8 10.5l4-2 4 2M12 14l-3 7M12 14l3 7" />
+  </svg>
+);
+
+export const Share = ({ className }: P) => (
+  <svg {...base(className)}>
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4" />
+  </svg>
+);
+
+export const Hand = ({ className }: P) => (
+  <svg {...base(className)}>
+    <path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8" />
+    <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15" />
+  </svg>
+);

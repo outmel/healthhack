@@ -62,3 +62,14 @@ body {
   .no-print { display: none !important; }
   body { background: #fff; }
 }
+
+/* Rep counter dot pulses once when a stand is counted. */
+@keyframes rep-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgb(232 163 23 / 0.7); }
+  60% { transform: scale(1.25); box-shadow: 0 0 0 10px rgb(232 163 23 / 0); }
+  100% { transform: scale(1); }
+}
+.rep-pulse { animation: rep-pulse 0.6s ease-out 1; }
+@media (prefers-reduced-motion: reduce) {
+  .rep-pulse { animation: none; }
+}

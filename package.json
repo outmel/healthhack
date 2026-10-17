@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts"
+    "test": "node --import tsx --test \"src/lib/*.test.ts\"",
+    "seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
+    "fixtures": "tsx scripts/fixtures/make-fixtures.ts",
+    "postinstall": "node scripts/copy-mediapipe.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.1",

@@ -3,13 +3,23 @@
 // 28-day story, day 28 = today (Singapore time):
 //   Days 1-20: stable. Eats 75-90% of meals, chair-stand 14-16 s.
 //   Day 21+:   intake drifts to 50-60%, chair-stand to 19-21 s, Siti's notes mention "pusing".
+//              The drift ramps in over 3 days, so the change begins (day 21) a day before
+//              Teman flags it, and the flag comes days before Siti's most worrying note.
 //   Siti has had no rest day since day 8.
+//   Every chair-stand carries a landmark track for the "then vs now" replay: the normal clip
+//   until the drift is under way, then the slow clip (pushing up with her hands on reps 3-5).
 // Today's lunch and today's chair-stand are left out so the live demo can add them.
 
 import { readFileSync } from "node:fs";
 import { scryptSync, randomBytes } from "node:crypto";
 import { Client } from "pg";
-import { recompute, evaluateSignal, dailySeries, SIGNALS } from "../src/lib/baseline";
+import { recompute, evaluateSignal, dailySeries, leadTime, SIGNALS } from "../src/lib/baseline";
+import { retime, type Track } from "../src/lib/pose";
+
+type Fixture = { rep_times: number[]; hand_reps: number[]; findings: string[]; track: Track };
+const fixture = (name: string): Fixture => JSON.parse(readFileSync(`scripts/fixtures/${name}.json`, "utf8"));
+const NORMAL = fixture("stand-normal");
+const SLOW = fixture("stand-slow");
 
 const DAYS = 28;
 const DRIFT_FROM = 21;
@@ -34,14 +44,15 @@ function at(d: number, hh: number, mm = 0) {
   return new Date(Date.UTC(y, mo, da - (DAYS - d), hh - 8, mm));
 }
 
-const VOICE_NOTES: { day: number; id: string; en: string }[] = [
+// concerns = what translateNote returns for these notes, so the GP view shows the same tags live.
+const VOICE_NOTES: { day: number; id: string; en: string; concerns?: string[] }[] = [
   { day: 3, id: "Ibu makan bubur habis, jalan pagi di koridor 10 menit.", en: "Ma'am finished her porridge and walked in the corridor for 10 minutes this morning." },
   { day: 9, id: "Ibu senang, cucu datang berkunjung. Makan siang banyak.", en: "Ma'am was happy, her grandchild visited. She ate a big lunch." },
   { day: 15, id: "Tidur siang agak lama hari ini, tapi makan normal.", en: "She napped a bit longer today, but ate normally." },
-  { day: 21, id: "Ibu bilang tidak lapar, makan siang hanya setengah.", en: "Ma'am said she wasn't hungry and only ate half her lunch." },
-  { day: 23, id: "Ibu bilang pusing waktu bangun dari kursi. Saya pegang tangannya.", en: "Ma'am said she felt dizzy when getting up from the chair. I held her hand." },
-  { day: 25, id: "Masih pusing pagi ini. Minum air sedikit sekali.", en: "Still dizzy this morning. She drank very little water." },
-  { day: 27, id: "Ibu pelan sekali waktu berdiri, pegang meja. Makan malam sedikit.", en: "She stood up very slowly, holding the table. Ate little dinner." },
+  { day: 21, id: "Ibu bilang tidak lapar, makan siang hanya setengah.", en: "Ma'am said she wasn't hungry and only ate half her lunch.", concerns: ["reduced appetite"] },
+  { day: 23, id: "Ibu bilang pusing waktu bangun dari kursi. Saya pegang tangannya.", en: "Ma'am said she felt dizzy when getting up from the chair. I held her hand.", concerns: ["dizziness on standing"] },
+  { day: 25, id: "Masih pusing pagi ini. Minum air sedikit sekali.", en: "Still dizzy this morning. She drank very little water.", concerns: ["dizziness", "low fluid intake"] },
+  { day: 27, id: "Ibu pelan sekali waktu berdiri, pegang meja. Makan malam sedikit.", en: "She stood up very slowly, holding the table. Ate little dinner.", concerns: ["slow to stand", "needs support to stand", "reduced appetite"] },
 ];
 
 async function main() {
@@ -60,18 +71,20 @@ async function main() {
   );
   const sitiId = users.find((u) => u.role === "helper").id;
   const { rows: [senior] } = await db.query(
-    `INSERT INTO seniors (name, age, household_id, conditions)
-     VALUES ('Mdm Tan', 82, 1, ARRAY['Mild hypertension']) RETURNING id`,
+    `INSERT INTO seniors (name, age, household_id, conditions, medications)
+     VALUES ('Mdm Tan', 82, 1, ARRAY['Mild hypertension'], ARRAY['Amlodipine 5 mg once daily']) RETURNING id`,
   );
 
   for (let d = 1; d <= DAYS; d++) {
-    const drifting = d >= DRIFT_FROM;
+    // 0 before day 21, then 1/3, 2/3, 1: a decline that builds over a few days.
+    const drift = d < DRIFT_FROM ? 0 : Math.min(1, (d - DRIFT_FROM + 1) / 3);
+    const mix = (normal: [number, number], drifted: [number, number]) => (1 - drift) * between(...normal) + drift * between(...drifted);
     const isToday = d === DAYS;
 
     // Meals: lunch and dinner. Today's lunch comes from the live demo.
     for (const [hh, label] of [[12, "lunch"], [18, "dinner"]] as const) {
       if (isToday) continue;
-      const pct = drifting ? between(50, 60) : between(75, 90);
+      const pct = mix([75, 90], [50, 60]);
       await db.query(
         `INSERT INTO observations (senior_id, type, value, meta, created_at) VALUES ($1, 'meal', $2, $3, $4)`,
         [senior.id, Math.round(pct), { meal: label, confidence: "seeded" }, at(d, hh, 30)],
@@ -80,10 +93,21 @@ async function main() {
 
     // Chair-stand: one per day, morning. Today's comes from the live demo.
     if (!isToday) {
-      const secs = drifting ? between(19, 21) : between(14, 16);
+      const secs = round1(mix([14, 16], [19, 21]));
+      // Stretch the clip so the replay lasts exactly as long as this day's time.
+      const clip = drift >= 0.5 ? SLOW : NORMAL;
+      const k = secs / clip.rep_times[clip.rep_times.length - 1];
+      const meta = {
+        reps: 5,
+        method: "seeded",
+        findings: clip.findings,
+        hand_reps: clip.hand_reps,
+        rep_times: clip.rep_times.map((x) => round1(x * k)),
+        landmarks: retime(clip.track, secs),
+      };
       await db.query(
         `INSERT INTO observations (senior_id, type, value, meta, created_at) VALUES ($1, 'mobility', $2, $3, $4)`,
-        [senior.id, round1(secs), { reps: 5, method: "seeded" }, at(d, 9, 15)],
+        [senior.id, secs, meta, at(d, 9, 15)],
       );
     }
 
@@ -99,8 +123,8 @@ async function main() {
   for (const n of VOICE_NOTES) {
     await db.query(
       `INSERT INTO observations (senior_id, type, original_text, translated_text, meta, created_at)
-       VALUES ($1, 'voice', $2, $3, '{"lang":"id"}', $4)`,
-      [senior.id, n.id, n.en, at(n.day, 16)],
+       VALUES ($1, 'voice', $2, $3, $4, $5)`,
+      [senior.id, n.id, n.en, { lang: "id", concerns: n.concerns ?? [] }, at(n.day, 16)],
     );
   }
 
@@ -111,8 +135,18 @@ async function main() {
       `${t.padEnd(8)} baseline ${st?.mean.toFixed(1)} ± ${st?.sd.toFixed(1)}  recent ${st?.recent?.toFixed(1)}  z ${st?.z?.toFixed(2)}  ${st?.flagged ? "FLAGGED" : "ok"}`,
     );
   }
+  const series = { meal: await dailySeries(db, senior.id, "meal"), mobility: await dailySeries(db, senior.id, "mobility") };
+  const lt = leadTime(series);
+  console.log(`lead time: change began ${lt.driftStart} · flagged ${lt.flagged} · family alerted ${lt.alerted}`);
   await recompute(senior.id, db);
-  const { rows: alerts } = await db.query(`SELECT signals, severity FROM alerts`);
+  // The engine runs "now"; date the seeded alert to the evening it would have fired.
+  if (lt.alerted) {
+    await db.query(
+      `UPDATE alerts SET created_at = ($1::date + time '20:00') AT TIME ZONE 'Asia/Singapore' WHERE array_length(signals, 1) >= 2`,
+      [lt.alerted],
+    );
+  }
+  const { rows: alerts } = await db.query(`SELECT signals, severity, created_at FROM alerts`);
   console.log("alerts:", alerts);
   if (!alerts.some((a) => a.signals.length >= 2)) {
     console.warn("WARNING: seed did not produce a combined alert — the demo story will not land.");

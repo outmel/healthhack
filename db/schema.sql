@@ -1,5 +1,5 @@
 -- Teman schema. Six tables from the build plan; password_hash and meta are the only additions.
-DROP TABLE IF EXISTS ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
+DROP TABLE IF EXISTS rest_days, ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
 
 CREATE TABLE users (
   id            SERIAL PRIMARY KEY,
@@ -16,10 +16,14 @@ CREATE TABLE seniors (
   name         TEXT NOT NULL,
   age          INT  NOT NULL,
   household_id INT  NOT NULL,
-  conditions   TEXT[] NOT NULL DEFAULT '{}'
+  conditions   TEXT[] NOT NULL DEFAULT '{}',
+  medications  TEXT[] NOT NULL DEFAULT '{}'
 );
 
 -- value: meal = % eaten (0-100), mobility = seconds for 5 chair-stands, voice = null
+-- meta for mobility: { reps, method: "pose" | "tap", findings[], hand_reps[], rep_times[], landmarks }
+--   landmarks = 13-joint track at 10 fps (src/lib/pose.ts); the video itself is never uploaded.
+-- meta for voice: { lang, concerns[] } (concerns from translateNote)
 CREATE TABLE observations (
   id              SERIAL PRIMARY KEY,
   senior_id       INT NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
@@ -50,7 +54,8 @@ CREATE TABLE alerts (
   severity     TEXT NOT NULL CHECK (severity IN ('info', 'watch', 'review')),
   message      TEXT NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  acknowledged BOOLEAN NOT NULL DEFAULT false
+  acknowledged BOOLEAN NOT NULL DEFAULT false,
+  gp_review_at TIMESTAMPTZ  -- set when the family books a GP review (POST /api/alerts/[id]/review)
 );
 
 CREATE TABLE carer_checkins (
@@ -69,4 +74,14 @@ CREATE TABLE ai_analyses (
   urgency    TEXT NOT NULL,
   result     JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Rest days the family gives the helper (POST /api/rest-day). Shown on the helper and GP views.
+CREATE TABLE rest_days (
+  id         SERIAL PRIMARY KEY,
+  helper_id  INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day        DATE NOT NULL,
+  set_by     INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (helper_id, day)
 );
