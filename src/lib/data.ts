@@ -227,3 +227,16 @@ export async function getToday(seniorId: number, helperId: number) {
   const has = (t: string) => rows.some((r) => r.type === t);
   return { meal: has("meal"), stand: has("mobility"), voice: has("voice"), checkin: has("checkin") };
 }
+
+export type CarerDay = { day: string; mood: number; rested: boolean };
+
+/** The helper's evening check-ins by Singapore day, for the carer lane on the care timeline. */
+export const getCarerDays = (household: number) =>
+  query<CarerDay>(
+    `SELECT to_char(c.created_at AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS day,
+            avg(c.mood)::float AS mood, bool_or(c.rested_today) AS rested
+       FROM carer_checkins c JOIN users u ON u.id = c.helper_id
+      WHERE u.household_id = $1 AND u.role = 'helper'
+      GROUP BY 1 ORDER BY 1`,
+    [household],
+  );

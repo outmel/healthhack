@@ -31,6 +31,12 @@ export default function DemoBar({ role, name }: { role: Role; name: string }) {
     await fetch("/api/login", { method: "DELETE" });
     window.location.assign("/login");
   }
+  async function resetDemo() {
+    if (!window.confirm("Put the demo story back to its starting point? Anything tried here (meals, stand tests, messages, rest days) is cleared for everyone.")) return;
+    setBusy("reset");
+    await fetch("/api/demo/reset", { method: "POST" }).catch(() => null);
+    window.location.reload();
+  }
   function finish() {
     setTour(false);
     setEnded(true);
@@ -53,9 +59,14 @@ export default function DemoBar({ role, name }: { role: Role; name: string }) {
             </span>
           ))}
         </span>
-        <button onClick={signOut} className="ml-auto text-cream/70 underline underline-offset-2 hover:text-cream">
-          Sign out
-        </button>
+        <span className="ml-auto flex items-center gap-3">
+          <button onClick={resetDemo} disabled={!!busy} className="text-cream/70 underline underline-offset-2 hover:text-cream disabled:opacity-60">
+            {busy === "reset" ? "Resetting…" : "Reset demo"}
+          </button>
+          <button onClick={signOut} className="text-cream/70 underline underline-offset-2 hover:text-cream">
+            Sign out
+          </button>
+        </span>
       </div>
       {tour && (
         <div className="bg-turmeric text-sun-deep">

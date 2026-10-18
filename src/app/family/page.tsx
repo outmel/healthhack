@@ -1,12 +1,13 @@
 import Shell, { Card, StatusIcon } from "@/components/Shell";
 import LogoutButton from "@/components/LogoutButton";
 import CareTimeline from "@/components/CareTimeline";
+import WhyFlagged from "@/components/WhyFlagged";
 import StandReplay from "@/components/StandReplay";
 import { Message, Phone, Standing, Utensils } from "@/components/icons";
 import { requireRole } from "@/lib/auth";
 import type { DailyPoint, SignalStatus } from "@/lib/baseline";
 import {
-  getAlerts, getCarerStatus, getCircle, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSenior, getSignals,
+  getAlerts, getCarerDays, getCarerStatus, getCircle, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSenior, getSignals,
   getStandComparison, getVoiceNotes, sgDay, translatedFrom, type VoiceNote,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
@@ -34,7 +35,7 @@ const PICTO: Record<Level, string> = {
 export default async function FamilyPage() {
   const session = await requireRole("family");
   const senior = await getSenior(session.household);
-  const [signals, alerts, notes, carer, ai, restDay, circle, helperUser] = await Promise.all([
+  const [signals, alerts, notes, carer, ai, restDay, circle, helperUser, carerDays] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 40),
@@ -43,6 +44,7 @@ export default async function FamilyPage() {
     getRestDay(session.household),
     getCircle(session.household),
     getHelper(session.household),
+    getCarerDays(session.household),
   ]);
   const replay = await getStandComparison(senior.id, signals.mobility.series);
   const plan = ai?.care_plan?.parse_error ? undefined : ai?.care_plan;
@@ -113,6 +115,7 @@ export default async function FamilyPage() {
           <p className="mt-2 text-body">
             {ai?.analysis.family_message ?? `Based on what ${helper} noticed, compared with her own usual.`}
           </p>
+          {alert && <WhyFlagged statuses={{ meal, mobility: mob }} variant="family" />}
           {alert && lead.flagged && (
             <p className="mt-3 rounded-2xl bg-cream p-3 text-[15px] leading-snug text-body">
               <strong>Teman noticed this on {fmtDay(lead.flagged)}</strong>
@@ -231,6 +234,8 @@ export default async function FamilyPage() {
             notes={notes.map((n) => ({ day: sgDay(n.created_at), text: n.translated_text ?? n.original_text, concerns: n.concerns }))}
             flagDay={lead.flagged}
             driftDay={lead.driftStart}
+            carer={carerDays}
+            carerName={helper}
           />
         </div>
       </Card>

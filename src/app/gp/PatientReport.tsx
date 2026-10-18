@@ -1,9 +1,10 @@
 // The GP report: used by the doctor view (/gp) and the read-only share link (/summary/[token]).
 import { Card } from "@/components/Shell";
 import CareTimeline from "@/components/CareTimeline";
+import WhyFlagged from "@/components/WhyFlagged";
 import StandReplay from "@/components/StandReplay";
 import {
-  getAlerts, getCarerStatus, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSignals, getStandComparison,
+  getAlerts, getCarerDays, getCarerStatus, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSignals, getStandComparison,
   getStandTests, getVoiceNotes, LANG_EN, sgDay, type Senior,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
@@ -21,7 +22,7 @@ const FALLS_CUTOFF: Reference = { value: 15, label: "Falls-risk cut-off" };
 const BUATOIS = "https://pubmed.ncbi.nlm.nih.gov/18808608/";
 
 export default async function PatientReport({ senior, household, readOnly = false }: { senior: Senior; household: number; readOnly?: boolean }) {
-  const [signals, alerts, notes, analysis, carer, tests, restDay, helper] = await Promise.all([
+  const [signals, alerts, notes, analysis, carer, tests, restDay, helper, carerDays] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 40),
@@ -30,6 +31,7 @@ export default async function PatientReport({ senior, household, readOnly = fals
     getStandTests(senior.id),
     getRestDay(household),
     getHelper(household),
+    getCarerDays(household),
   ]);
   const helperLang = LANG_EN[helper?.language ?? "id"] ?? "her language";
   const replay = readOnly ? null : await getStandComparison(senior.id, signals.mobility.series);
@@ -89,6 +91,7 @@ export default async function PatientReport({ senior, household, readOnly = fals
 
       <div className="flex min-w-0 flex-[3_1_560px] flex-col gap-5">
         <AnalysisPanel initial={analysis} lead={leadLine} readOnly={readOnly} />
+        <WhyFlagged statuses={{ meal: signals.meal.status, mobility: signals.mobility.status }} variant="gp" />
 
         {!analysis && alert && (
           <p className="rounded-2xl bg-sun-soft p-4 text-sun-deep">
@@ -109,6 +112,8 @@ export default async function PatientReport({ senior, household, readOnly = fals
               notes={notes.map((n) => ({ day: sgDay(n.created_at), text: n.translated_text ?? n.original_text, concerns: n.concerns }))}
               flagDay={lead.flagged}
               driftDay={lead.driftStart}
+              carer={carerDays}
+              carerName={carer?.name}
               showValues
             />
           </div>
