@@ -58,9 +58,13 @@ body {
   border-radius: 12px;
 }
 
+/* "Download 1-page summary" (GP view and the shared /summary link): A4, scaled down so the
+   sidebar and the report sit side by side, with only what a GP needs at the visit. */
 @media print {
+  @page { size: A4; margin: 8mm; }
   .no-print { display: none !important; }
-  body { background: #fff; }
+  body { background: #fff; zoom: 0.54; }
+  section, article, .rounded-\[22px\], .rounded-2xl { break-inside: avoid; }
 }
 
 /* Rep counter dot pulses once when a stand is counted. */

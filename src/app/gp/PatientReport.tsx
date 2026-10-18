@@ -87,6 +87,13 @@ export default async function PatientReport({ senior, household, readOnly = fals
             </>
           )}
         </Card>
+        {/* Printout only: the latest notes fill the sidebar so the summary fits on one page. */}
+        {notes.length > 0 && (
+          <Card className="mt-5 hidden text-[15px] print:block">
+            <p className="eyebrow text-muted">What {carer?.name ?? "the helper"} noticed</p>
+            <NoteList notes={notes.slice(0, SHOWN)} tags={tagWords} />
+          </Card>
+        )}
       </aside>
 
       <div className="flex min-w-0 flex-[3_1_560px] flex-col gap-5">
@@ -99,7 +106,8 @@ export default async function PatientReport({ senior, household, readOnly = fals
           </p>
         )}
 
-        <Card>
+        {/* On screen only: the two charts below carry the same days, with values, on the printout. */}
+        <Card className="no-print">
           <h2 className="text-lg font-extrabold">Last 28 days</h2>
           <p className="text-sm text-muted">Each mark is a day. Hover for values.</p>
           <div className="mt-3">
@@ -157,7 +165,7 @@ export default async function PatientReport({ senior, household, readOnly = fals
           </Card>
         )}
 
-        <Card>
+        <Card className="print:hidden">
           <h2 className="text-lg font-extrabold">What {carer?.name ?? "the helper"} noticed</h2>
           <p className="text-sm text-muted">Translated from the original; original shown underneath. Tags are concerns picked out at translation.</p>
           {notes.length === 0 ? (

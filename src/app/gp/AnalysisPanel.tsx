@@ -79,7 +79,8 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
                 {a.red_flags.map((f) => <li key={f}>⚠ {f}</li>)}
               </ul>
             )}
-            {!!a.worth_reviewing?.length && (
+            {/* The care plan's "Clinical checks" cover the same ground; show these only when it has none. */}
+            {!!a.worth_reviewing?.length && !(plan && !plan.parse_error && plan.gp_checks?.length) && (
               <div className="rounded-2xl bg-cream p-4">
                 <p className="font-extrabold">Worth checking at the visit</p>
                 <ul className="mt-1.5 list-disc space-y-1 pl-5 text-body">{a.worth_reviewing.map((q) => <li key={q}>{q}</li>)}</ul>
@@ -108,7 +109,7 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
                     </div>
                   )}
                   {!!plan.escalation?.call_995_if.length && (
-                    <div className="rounded-2xl bg-coral-soft p-4 text-coral">
+                    <div className="no-print rounded-2xl bg-coral-soft p-4 text-coral">
                       <p className="flex items-center gap-2 font-extrabold"><Phone className="h-5 w-5" /> Call 995 if</p>
                       <ul className="mt-2 list-disc space-y-1 pl-5 font-semibold">{plan.escalation.call_995_if.map((x) => <li key={x}>{x}</li>)}</ul>
                     </div>
@@ -116,8 +117,8 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
                 </div>
                 {!!plan.focus_areas?.length && (
                   <>
-                    <p className="eyebrow pt-1 text-muted">What the family and helper are doing at home</p>
-                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+                    <p className="no-print eyebrow pt-1 text-muted">What the family and helper are doing at home</p>
+                    <div className="no-print grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
                       {plan.focus_areas.map((f) => (
                         <AreaCard key={f.area} area={f} actions={[...(f.family_actions ?? []), ...(f.helper_actions ?? [])]} startLabel="First step at home" />
                       ))}
