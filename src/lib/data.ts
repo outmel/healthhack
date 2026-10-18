@@ -132,6 +132,28 @@ export const getMessages = (helperId: number, limit = 3) =>
     [helperId, limit],
   );
 
+/** Latest message from each sender (newest first), so a family "thank you" can't hide the GP's advice. */
+export async function getLatestPerSender(userId: number, max = 2) {
+  const seen = new Set<string>();
+  return (await getMessages(userId, 10)).filter((m) => !seen.has(m.from_name) && seen.add(m.from_name)).slice(0, max);
+}
+
+/** Family members of a household (a GP message to "the family" goes to each). */
+export const getFamily = (household: number) =>
+  query<{ id: number; name: string }>(`SELECT id, name FROM users WHERE household_id = $1 AND role = 'family' ORDER BY id`, [household]);
+
+export type SentMessage = { id: number; to_name: string; to_role: string; original_text: string; translated_text: string | null; created_at: string };
+
+/** What a user has sent in the last two weeks, newest first (the GP's contact card). */
+export const getSentMessages = (userId: number, limit = 5) =>
+  query<SentMessage>(
+    `SELECT m.id, u.name AS to_name, u.role AS to_role, m.original_text, m.translated_text, m.created_at
+       FROM messages m JOIN users u ON u.id = m.to_user
+      WHERE m.from_user = $1 AND m.created_at > now() - interval '14 days'
+      ORDER BY m.created_at DESC LIMIT $2`,
+    [userId, limit],
+  );
+
 /** Names of the family member and GP, for "Rachel and Dr Lim can now see this". */
 export async function getCircle(household: number) {
   const rows = await query<{ role: string; name: string }>(`SELECT role, name FROM users WHERE household_id = $1`, [household]);

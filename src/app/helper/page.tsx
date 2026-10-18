@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/auth";
-import { getCarerStatus, getChecksThisMonth, getCircle, getLatestAnalysis, getMessages, getRestDay, getSenior, getToday } from "@/lib/data";
+import { getCarerStatus, getChecksThisMonth, getCircle, getLatestAnalysis, getLatestPerSender, getRestDay, getSenior, getToday } from "@/lib/data";
 import HelperApp from "./HelperApp";
 import type { Lang } from "@/lib/i18n";
 
@@ -13,9 +13,8 @@ export default async function HelperPage() {
     getChecksThisMonth(senior.id),
     getRestDay(session.household),
     getCircle(session.household),
-    getMessages(session.uid, 1),
+    getLatestPerSender(session.uid),
   ]);
-  const message = messages[0] ?? null;
   return (
     <HelperApp
       name={session.name}
@@ -30,7 +29,7 @@ export default async function HelperPage() {
       careSteps={ai?.care_plan?.helper_care_tips && !ai.care_plan.parse_error
         ? { text: ai.care_plan.helper_care_tips, en: ai.care_plan.helper_care_tips_en ?? "" }
         : null}
-      message={message && { from: message.from_name, text: message.translated_text ?? message.original_text, original: message.original_text }}
+      messages={messages.map((m) => ({ from: m.from_name, text: m.translated_text ?? m.original_text, original: m.original_text }))}
     />
   );
 }

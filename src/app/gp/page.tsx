@@ -19,7 +19,7 @@ export default async function GpPage() {
         </span>
       }
     >
-      <PatientReport senior={senior} household={session.household} />
+      <PatientReport senior={senior} household={session.household} gpId={session.uid} />
     </Shell>
   );
 }

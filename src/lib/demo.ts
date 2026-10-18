@@ -15,7 +15,7 @@ export const DEMO_USERS: { role: Role; email: string; who: string }[] = [
 export const TOUR: Record<Role, { step: number; text: string; next?: string }> = {
   helper: { step: 1, text: "As Siti, log today's lunch and the stand test.", next: "See Rachel's alert" },
   family: { step: 2, text: "Rachel sees the alert at the top. Try “Message Siti” too.", next: "See Dr Lim's view" },
-  gp: { step: 3, text: "Dr Lim sees the trend charts and the AI summary for the visit." },
+  gp: { step: 3, text: "Dr Lim sees the trend charts and the AI summary, and can message Siti or Rachel." },
 };
 
 /** Signs in as a demo user and opens their page. */

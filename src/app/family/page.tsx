@@ -7,7 +7,7 @@ import { Message, Phone, Standing, Utensils } from "@/components/icons";
 import { requireRole } from "@/lib/auth";
 import type { DailyPoint, SignalStatus } from "@/lib/baseline";
 import {
-  getAlerts, getCarerDays, getCarerStatus, getCircle, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSenior, getSignals,
+  getAlerts, getCarerDays, getCarerStatus, getCircle, getHelper, getLatestAnalysis, getLatestPerSender, getLeadTime, getRestDay, getSenior, getSignals,
   getStandComparison, getVoiceNotes, sgDay, translatedFrom, type VoiceNote,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
@@ -35,7 +35,7 @@ const PICTO: Record<Level, string> = {
 export default async function FamilyPage() {
   const session = await requireRole("family");
   const senior = await getSenior(session.household);
-  const [signals, alerts, notes, carer, ai, restDay, circle, helperUser, carerDays] = await Promise.all([
+  const [signals, alerts, notes, carer, ai, restDay, circle, helperUser, carerDays, inbox] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 40),
@@ -45,6 +45,7 @@ export default async function FamilyPage() {
     getCircle(session.household),
     getHelper(session.household),
     getCarerDays(session.household),
+    getLatestPerSender(session.uid),
   ]);
   const replay = await getStandComparison(senior.id, signals.mobility.series);
   const plan = ai?.care_plan?.parse_error ? undefined : ai?.care_plan;
@@ -89,6 +90,19 @@ export default async function FamilyPage() {
         <p className="text-[15px] text-muted">Hi {session.name} · {when(new Date())}</p>
         <h1 className="text-[28px] font-extrabold tracking-tight">How Mum is doing</h1>
       </header>
+
+      {/* Messages to the family: from the GP's contact card (last 7 days) */}
+      {inbox.map((m) => (
+        <section key={m.id} className="rounded-[22px] border-2 border-brand bg-paper p-5">
+          <p className="eyebrow flex items-center gap-1.5 text-brand">
+            <Message className="h-4 w-4" /> Message from {m.from_name}
+          </p>
+          <p className="mt-1.5 text-[19px] font-bold leading-snug">{m.original_text}</p>
+          <p className="mt-1 text-sm text-faint">
+            {new Date(m.created_at).toLocaleString("en-SG", { timeZone: TZ, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+          </p>
+        </section>
+      ))}
 
       {/* 1. Mum today: three pictograms against her own usual, one plain sentence */}
       <section className="overflow-hidden rounded-[22px] border border-line bg-paper">

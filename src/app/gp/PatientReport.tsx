@@ -4,13 +4,14 @@ import CareTimeline from "@/components/CareTimeline";
 import WhyFlagged from "@/components/WhyFlagged";
 import StandReplay from "@/components/StandReplay";
 import {
-  getAlerts, getCarerDays, getCarerStatus, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSignals, getStandComparison,
-  getStandTests, getVoiceNotes, LANG_EN, sgDay, type Senior,
+  getAlerts, getCarerDays, getCarerStatus, getFamily, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSentMessages, getSignals,
+  getStandComparison, getStandTests, getVoiceNotes, LANG_EN, sgDay, type Senior,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
 import { formatReps } from "@/lib/pose";
 import TrendChart, { type Reference } from "./TrendChart";
 import AnalysisPanel from "./AnalysisPanel";
+import ContactHousehold from "./ContactHousehold";
 
 const SHOWN = 3;
 const day = (d: string | Date) => fmtDay(sgDay(d), { weekday: false });
@@ -21,7 +22,10 @@ const day = (d: string | Date) => fmtDay(sgDay(d), { weekday: false });
 const FALLS_CUTOFF: Reference = { value: 15, label: "Falls-risk cut-off" };
 const BUATOIS = "https://pubmed.ncbi.nlm.nih.gov/18808608/";
 
-export default async function PatientReport({ senior, household, readOnly = false }: { senior: Senior; household: number; readOnly?: boolean }) {
+/** `gpId` (the signed-in GP) turns on the contact card; the read-only share link has none. */
+export default async function PatientReport({ senior, household, readOnly = false, gpId }: { senior: Senior; household: number; readOnly?: boolean; gpId?: number }) {
+  const contact = !readOnly && gpId != null;
+  const [family, sent] = contact ? await Promise.all([getFamily(household), getSentMessages(gpId)]) : [[], []];
   const [signals, alerts, notes, analysis, carer, tests, restDay, helper, carerDays] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
@@ -74,6 +78,11 @@ export default async function PatientReport({ senior, household, readOnly = fals
             {lastUpdate && <Row label="Last update">{day(lastUpdate)}</Row>}
             {booked?.gp_review_at && <Row label="GP review">Booked by family for {fmtDay(sgDay(booked.gp_review_at))}</Row>}
           </dl>
+          {contact && (helper || family.length > 0) && (
+            <a href="#contact" className="no-print mt-4 inline-flex min-h-11 items-center rounded-2xl border-2 border-brand px-4 font-bold text-brand">
+              Contact {[helper?.name, family[0]?.name].filter(Boolean).join(" or ")}
+            </a>
+          )}
           {carer && (
             <>
               <hr className="my-4 border-track" />
@@ -184,6 +193,15 @@ export default async function PatientReport({ senior, household, readOnly = fals
             </>
           )}
         </Card>
+
+        {contact && (
+          <ContactHousehold
+            seniorName={senior.name}
+            helper={helper && { name: helper.name, language: helper.language }}
+            family={family.length ? family.map((f) => f.name).join(" and ") : null}
+            sent={sent}
+          />
+        )}
       </div>
     </div>
   );

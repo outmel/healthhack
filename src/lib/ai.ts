@@ -96,12 +96,13 @@ export async function translateNote(text: string, lang: string): Promise<Transla
 const LANG_NAMES: Record<string, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
 
 /** A family member's message to the helper, in the helper's own language. */
-export async function translateForHelper(text: string, lang: string): Promise<string> {
+export async function translateForHelper(text: string, lang: string, sender: "family" | "gp" = "family"): Promise<string> {
   if (lang === "en") return text;
+  const from = sender === "gp" ? "the family doctor (GP) of the elderly person she cares for" : "a Singapore family";
   const { translated } = await chatJson(z.object({ translated: z.string().min(1) }), [
     {
       role: "system",
-      content: `You translate short messages from a Singapore family to their live-in domestic helper. Translate into simple, warm, natural ${LANG_NAMES[lang] ?? lang}. Keep names as they are and refer to the elderly person the way a helper would (e.g. "Ibu" in Bahasa Indonesia, "Lola" or "Ma'am" in Tagalog). Reply with JSON only: {"translated": string}.`,
+      content: `You translate short messages from ${from} to their live-in domestic helper.${sender === "gp" ? " Keep any care instruction exact and easy to follow." : ""} Translate into simple, warm, natural ${LANG_NAMES[lang] ?? lang}. Keep names as they are and refer to the elderly person the way a helper would (e.g. "Ibu" in Bahasa Indonesia, "Lola" or "Ma'am" in Tagalog). Reply with JSON only: {"translated": string}.`,
     },
     { role: "user", content: text },
   ]);

@@ -20,13 +20,14 @@ type IconT = (p: { className?: string }) => React.ReactElement;
 const TZ = "Asia/Singapore";
 const LANG_NAME: Record<Lang, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
 type Circle = { family: string; gp: string };
-type FamilyMessage = { from: string; text: string; original: string } | null;
+/** From the family or the GP, already translated into her language. */
+type InboxMessage = { from: string; text: string; original: string };
 
 export default function HelperApp({
-  name, seniorName, initialLang, initialDone, daysWithoutRest, tip, checks: initialChecks, restDay, circle, message, careSteps,
+  name, seniorName, initialLang, initialDone, daysWithoutRest, tip, checks: initialChecks, restDay, circle, messages, careSteps,
 }: {
   name: string; seniorName: string; initialLang: Lang; initialDone: Done; daysWithoutRest: number | null; tip: Tip;
-  checks: number; restDay: { day: string; set_by: string } | null; circle: Circle; message: FamilyMessage; careSteps: Tip;
+  checks: number; restDay: { day: string; set_by: string } | null; circle: Circle; messages: InboxMessage[]; careSteps: Tip;
 }) {
   const [lang, setLang] = useState<Lang>(initialLang in DICTS ? initialLang : "id");
   const [screen, setScreen] = useState<Screen>("home");
@@ -101,8 +102,8 @@ export default function HelperApp({
                   .replace("{name}", restDay.set_by)}
               </p>
             )}
-            {message && (
-              <section className="rounded-[22px] border-2 border-rose bg-paper p-4">
+            {messages.map((message) => (
+              <section key={message.from} className="rounded-[22px] border-2 border-rose bg-paper p-4">
                 <p className="eyebrow flex items-center gap-1.5 text-rose">
                   <Message className="h-4 w-4" /> {t.messageFrom.replace("{name}", message.from)}
                 </p>
@@ -114,7 +115,7 @@ export default function HelperApp({
                   </details>
                 )}
               </section>
-            )}
+            ))}
             <section aria-label={t.todayTitle} className="flex flex-col gap-3">
               {tasks.map((k) => (
                 <TaskCard key={k.key} Icon={k.Icon} label={k.label} hint={k.hint} done={k.done} current={k.key === current} t={t} onClick={() => setScreen(k.key)} />
