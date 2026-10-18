@@ -131,8 +131,18 @@ export default function LoginPage() {
             {reset === "error" && <span role="status" className="font-semibold text-coral">Couldn&apos;t reset. Try again.</span>}
           </p>
 
-          <details className="mt-6 max-w-md rounded-[22px] border border-line bg-paper p-4">
-            <summary className="cursor-pointer font-semibold text-muted">Sign in with email instead</summary>
+          <div className="mt-8 flex max-w-2xl flex-wrap items-center justify-between gap-4 rounded-[22px] border border-line bg-paper p-5">
+            <div>
+              <p className="text-lg font-extrabold">Using Teman for your own family?</p>
+              <p className="text-body">Create an account for your household, then invite the helper and GP.</p>
+            </div>
+            <a href="/signup" className="inline-flex min-h-[52px] items-center rounded-2xl bg-brand px-5 font-bold text-cream hover:bg-brand-dark">
+              Create an account
+            </a>
+          </div>
+
+          <details className="mt-4 max-w-md rounded-[22px] border border-line bg-paper p-4">
+            <summary className="cursor-pointer font-semibold text-muted">Sign in with email</summary>
             <form
               className="mt-4 flex flex-col gap-3"
               onSubmit={(ev) => {

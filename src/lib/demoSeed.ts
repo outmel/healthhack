@@ -15,8 +15,10 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { scryptSync, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
+import { hashPassword } from "./password";
+// Only the demo household is reset; households people signed up for are never touched.
+import { DEMO_HOUSEHOLD } from "./demo";
 import { recompute, evaluateSignal, dailySeries, leadTime, SIGNALS, type SignalStatus } from "./baseline";
 import { retime, type Track } from "./pose";
 import normalFixture from "../../scripts/fixtures/stand-normal.json";
@@ -33,11 +35,6 @@ const NO_REST_FROM = 8;
 export const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "teman2026";
 
 type Db = Pick<PoolClient, "query">;
-
-export function hashPassword(pw: string) {
-  const salt = randomBytes(16).toString("hex");
-  return `${salt}:${scryptSync(pw, salt, 32).toString("hex")}`;
-}
 
 /** Today's date in Singapore, YYYY-MM-DD. */
 const sgToday = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
@@ -62,7 +59,7 @@ const VOICE_NOTES: { day: number; id: string; en: string; concerns?: string[] }[
 ];
 
 /**
- * Wipes and reseeds everything inside one transaction, so other requests see either the old
+ * Wipes and reseeds the demo household inside one transaction, so other requests see either the old
  * story or the new one, never half of each. An advisory lock stops two resets racing.
  */
 export async function seedDemo(db: Db, log: (...a: unknown[]) => void = () => {}, { onlyIfStale = false } = {}) {
@@ -76,25 +73,29 @@ export async function seedDemo(db: Db, log: (...a: unknown[]) => void = () => {}
   try {
     await db.query("SELECT pg_advisory_xact_lock(4242)");
     // Another request may have refreshed it while we waited for the lock.
-    if (onlyIfStale && (await seededOn(db)) === sgToday()) {
+    if (onlyIfStale && (await isFresh(db))) {
       await db.query("COMMIT");
       return { combinedAlert: true, skipped: true };
     }
     await db.query(readFileSync(join(process.cwd(), "db/schema.sql"), "utf8"));
+    // Deleting the senior and users cascades to everything else in the household.
+    await db.query(`DELETE FROM seniors WHERE household_id = $1`, [DEMO_HOUSEHOLD]);
+    await db.query(`DELETE FROM users WHERE household_id = $1`, [DEMO_HOUSEHOLD]);
 
     const pw = hashPassword(DEMO_PASSWORD);
     const { rows: users } = await db.query(
       `INSERT INTO users (email, password_hash, name, role, language, household_id) VALUES
-         ('siti@teman.demo',   $1, 'Siti',     'helper', 'id', 1),
-         ('rachel@teman.demo', $1, 'Rachel',   'family', 'en', 1),
-         ('drlim@teman.demo',  $1, 'Dr Lim',   'gp',     'en', 1)
+         ('siti@teman.demo',   $1, 'Siti',     'helper', 'id', $2),
+         ('rachel@teman.demo', $1, 'Rachel',   'family', 'en', $2),
+         ('drlim@teman.demo',  $1, 'Dr Lim',   'gp',     'en', $2)
        RETURNING id, role`,
-      [pw],
+      [pw, DEMO_HOUSEHOLD],
     );
     const sitiId = users.find((u) => u.role === "helper").id;
     const { rows: [senior] } = await db.query(
       `INSERT INTO seniors (name, age, household_id, conditions, medications)
-       VALUES ('Mdm Tan', 82, 1, ARRAY['Mild hypertension'], ARRAY['Amlodipine 5 mg once daily']) RETURNING id`,
+       VALUES ('Mdm Tan', 82, $1, ARRAY['Mild hypertension'], ARRAY['Amlodipine 5 mg once daily']) RETURNING id`,
+      [DEMO_HOUSEHOLD],
     );
 
     // Collected and inserted in one statement per table: a reset is a handful of round trips.
@@ -170,8 +171,9 @@ export async function seedDemo(db: Db, log: (...a: unknown[]) => void = () => {}
     // The engine runs "now"; date the seeded alert to the evening it would have fired.
     if (lt.alerted) {
       await db.query(
-        `UPDATE alerts SET created_at = ($1::date + time '20:00') AT TIME ZONE 'Asia/Singapore' WHERE array_length(signals, 1) >= 2`,
-        [lt.alerted],
+        `UPDATE alerts SET created_at = ($1::date + time '20:00') AT TIME ZONE 'Asia/Singapore'
+          WHERE senior_id = $2 AND array_length(signals, 1) >= 2`,
+        [lt.alerted, senior.id],
       );
     }
 
@@ -179,7 +181,7 @@ export async function seedDemo(db: Db, log: (...a: unknown[]) => void = () => {}
     await db.query(`INSERT INTO ai_analyses (senior_id, urgency, result) VALUES ($1, $2, $3)`, [senior.id, analysis.urgency, analysis]);
     await db.query(`INSERT INTO demo_meta (seeded_on) VALUES ($1)`, [sgToday()]);
 
-    const { rows: alerts } = await db.query(`SELECT signals, severity, created_at FROM alerts`);
+    const { rows: alerts } = await db.query(`SELECT signals, severity, created_at FROM alerts WHERE senior_id = $1`, [senior.id]);
     log("alerts:", alerts);
     await db.query("COMMIT");
     return { combinedAlert: alerts.some((a) => a.signals.length >= 2) };
@@ -195,9 +197,16 @@ export async function seedDemo(db: Db, log: (...a: unknown[]) => void = () => {}
  */
 export async function ensureFreshDemo(db: Db) {
   if (process.env.DEMO_AUTO_RESET === "off") return false;
-  if ((await seededOn(db)) === sgToday()) return false;
+  if (await isFresh(db)) return false;
   await seedDemo(db, undefined, { onlyIfStale: true });
   return true;
+}
+
+/** Seeded today, and the schema is current (a database from before sign-up has no households table). */
+async function isFresh(db: Db) {
+  if ((await seededOn(db)) !== sgToday()) return false;
+  const { rows: [t] } = await db.query(`SELECT to_regclass('households') IS NOT NULL AS ok`);
+  return t.ok as boolean;
 }
 
 /** The day the story was last seeded, or null before the first seed with demo_meta. */

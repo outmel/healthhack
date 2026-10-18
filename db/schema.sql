@@ -1,7 +1,19 @@
 -- Teman schema. Six tables from the build plan; password_hash and meta are the only additions.
-DROP TABLE IF EXISTS demo_meta, messages, rest_days, ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
+-- Run on every demo reset, so it only creates what's missing: accounts people signed up for
+-- survive. The reset itself clears household 1 only (src/lib/demoSeed.ts).
+-- Changing a table here won't alter an existing database; drop it by hand (or ALTER) first.
 
-CREATE TABLE users (
+-- Household 1 is the demo (no code, so nobody can join it). Signed-up households get an
+-- invite code the helper and GP use to join (POST /api/signup).
+CREATE TABLE IF NOT EXISTS households (
+  id         SERIAL PRIMARY KEY,
+  code       TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO households (id, code) VALUES (1, NULL) ON CONFLICT DO NOTHING;
+SELECT setval(pg_get_serial_sequence('households', 'id'), GREATEST((SELECT max(id) FROM households), 1));
+
+CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   email         TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
@@ -11,7 +23,7 @@ CREATE TABLE users (
   household_id  INT  NOT NULL
 );
 
-CREATE TABLE seniors (
+CREATE TABLE IF NOT EXISTS seniors (
   id           SERIAL PRIMARY KEY,
   name         TEXT NOT NULL,
   age          INT  NOT NULL,
@@ -24,7 +36,7 @@ CREATE TABLE seniors (
 -- meta for mobility: { reps, method: "pose" | "tap", findings[], hand_reps[], rep_times[], landmarks }
 --   landmarks = 13-joint track at 10 fps (src/lib/pose.ts); the video itself is never uploaded.
 -- meta for voice: { lang, concerns[] } (concerns from translateNote)
-CREATE TABLE observations (
+CREATE TABLE IF NOT EXISTS observations (
   id              SERIAL PRIMARY KEY,
   senior_id       INT NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
   type            TEXT NOT NULL CHECK (type IN ('meal', 'mobility', 'voice')),
@@ -35,9 +47,9 @@ CREATE TABLE observations (
   translated_text TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX observations_senior_type_time ON observations (senior_id, type, created_at);
+CREATE INDEX IF NOT EXISTS observations_senior_type_time ON observations (senior_id, type, created_at);
 
-CREATE TABLE baselines (
+CREATE TABLE IF NOT EXISTS baselines (
   senior_id   INT  NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
   type        TEXT NOT NULL,
   mean        REAL NOT NULL,
@@ -47,7 +59,7 @@ CREATE TABLE baselines (
   PRIMARY KEY (senior_id, type)
 );
 
-CREATE TABLE alerts (
+CREATE TABLE IF NOT EXISTS alerts (
   id           SERIAL PRIMARY KEY,
   senior_id    INT NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
   signals      TEXT[] NOT NULL,
@@ -58,7 +70,7 @@ CREATE TABLE alerts (
   gp_review_at TIMESTAMPTZ  -- set when the family books a GP review (POST /api/alerts/[id]/review)
 );
 
-CREATE TABLE carer_checkins (
+CREATE TABLE IF NOT EXISTS carer_checkins (
   id           SERIAL PRIMARY KEY,
   helper_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   mood         INT NOT NULL CHECK (mood BETWEEN 1 AND 5),
@@ -68,7 +80,7 @@ CREATE TABLE carer_checkins (
 );
 
 -- Written by the n8n "Teman – patient trend analysis" workflow (n8n/teman-analysis-workflow.json).
-CREATE TABLE ai_analyses (
+CREATE TABLE IF NOT EXISTS ai_analyses (
   id         SERIAL PRIMARY KEY,
   senior_id  INT  NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
   urgency    TEXT NOT NULL,
@@ -77,7 +89,7 @@ CREATE TABLE ai_analyses (
 );
 
 -- Rest days the family gives the helper (POST /api/rest-day). Shown on the helper and GP views.
-CREATE TABLE rest_days (
+CREATE TABLE IF NOT EXISTS rest_days (
   id         SERIAL PRIMARY KEY,
   helper_id  INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   day        DATE NOT NULL,
@@ -87,7 +99,7 @@ CREATE TABLE rest_days (
 );
 
 -- Family -> helper messages (POST /api/messages), translated into the helper's language.
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id              SERIAL PRIMARY KEY,
   from_user       INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   to_user         INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -98,7 +110,7 @@ CREATE TABLE messages (
 );
 
 -- When the demo story was last seeded (src/lib/demoSeed.ts), so it can refresh once a day.
-CREATE TABLE demo_meta (
+CREATE TABLE IF NOT EXISTS demo_meta (
   seeded_on  DATE NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -7,7 +7,7 @@ export function proxy(req: NextRequest) {
   const session = decodeSession(req.cookies.get(SESSION_COOKIE)?.value);
   const { pathname } = req.nextUrl;
 
-  if (pathname === "/" || pathname === "/login") {
+  if (pathname === "/" || pathname === "/login" || pathname === "/signup") {
     return session ? NextResponse.redirect(new URL(HOME[session.role], req.url)) : pathname === "/" ? NextResponse.redirect(new URL("/login", req.url)) : NextResponse.next();
   }
 
@@ -18,4 +18,4 @@ export function proxy(req: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/login", "/helper/:path*", "/family/:path*", "/gp/:path*"] };
+export const config = { matcher: ["/", "/login", "/signup","/helper/:path*", "/family/:path*", "/gp/:path*"] };

@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 import { DEMO_USERS, TOUR, setTour, signInAs, tourOn } from "@/lib/demo";
 import type { Role } from "@/lib/session";
 
-export default function DemoBar({ role, name }: { role: Role; name: string }) {
+export default function DemoBar({ role, name, demo, code }: { role: Role; name: string; demo: boolean; code: string | null }) {
   const path = usePathname();
   // localStorage only exists in the browser; the server render never shows the tour.
   const stored = useSyncExternalStore(noSubscribe, tourOn, () => false);
@@ -17,6 +17,28 @@ export default function DemoBar({ role, name }: { role: Role; name: string }) {
 
   // The read-only GP summary link is for the clinic, not part of the demo.
   if (path.startsWith("/summary")) return null;
+
+  // A signed-up household: no role switching, reset or tour; just the code to invite others.
+  if (!demo) {
+    return (
+      <div className="no-print bg-ink text-cream">
+        <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
+          <span>
+            Signed in as <strong>{name}</strong>
+          </span>
+          {code && (
+            <span>
+              <span className="text-cream/60">· Invite your helper, family or GP with code </span>
+              <strong className="font-mono tracking-widest text-turmeric">{code}</strong>
+            </span>
+          )}
+          <button onClick={signOut} className="ml-auto text-cream/70 underline underline-offset-2 hover:text-cream">
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const others = DEMO_USERS.filter((u) => u.role !== role);
   const step = TOUR[role];

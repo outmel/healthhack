@@ -2,6 +2,8 @@
 import type { Role } from "./session";
 
 export const DEMO_PASSWORD = "teman2026";
+/** Keep in sync with demoSeed.ts (which can't be imported in the browser). */
+export const DEMO_HOUSEHOLD = 1;
 
 export const DEMO_USERS: { role: Role; email: string; who: string }[] = [
   { role: "helper", email: "siti@teman.demo", who: "Siti" },

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { pool, query } from "@/lib/db";
 import { ensureFreshDemo } from "@/lib/demoSeed";
-import { verifyPassword } from "@/lib/auth";
-import { encodeSession, HOME, SESSION_COOKIE, type Role } from "@/lib/session";
+import { signedIn, verifyPassword } from "@/lib/auth";
+import { SESSION_COOKIE, type Role } from "@/lib/session";
 
 type UserRow = { id: number; name: string; role: Role; language: string; household_id: number; password_hash: string };
 
@@ -15,13 +15,7 @@ export async function POST(req: Request) {
   if (!user || !verifyPassword(String(password), user.password_hash)) {
     return NextResponse.json({ error: "Wrong email or password" }, { status: 401 });
   }
-  const res = NextResponse.json({ redirect: HOME[user.role] });
-  res.cookies.set(
-    SESSION_COOKIE,
-    encodeSession({ uid: user.id, role: user.role, name: user.name, lang: user.language, household: user.household_id }),
-    { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 7 },
-  );
-  return res;
+  return signedIn({ uid: user.id, role: user.role, name: user.name, lang: user.language, household: user.household_id });
 }
 
 export async function DELETE() {
