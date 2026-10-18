@@ -375,9 +375,9 @@ function PhotoPicker({ step, label, hint, file, onFile }: { step: number; label:
   const url = useMemo(() => (file ? URL.createObjectURL(file) : undefined), [file]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   return (
-    <label className="flex cursor-pointer flex-col gap-2">
-      {/* Fixed two-line label height so the before/after boxes line up even when one label wraps. */}
-      <span className="flex min-h-12 items-start gap-2 font-bold leading-6">
+    <label className="flex h-full cursor-pointer flex-col gap-2">
+      {/* The label grows to fill the row, so the before/after boxes line up however many lines either label wraps to. */}
+      <span className="flex flex-1 items-start gap-2 font-bold leading-6">
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm ${file ? "bg-brand text-cream" : "bg-brand-soft text-brand-dark"}`}>
           {file ? <Check className="h-4 w-4" /> : step}
         </span>
@@ -771,11 +771,32 @@ function CheckIn({ t, name, done, daysWithoutRest, onDone }: { t: Dict; name: st
   );
 }
 
-/** The care plan's tips arrive as one string ("1. ... 2. ..." or sentences); one card per step. */
+/**
+ * The care plan's tips arrive as one string: "1. … 2. …", "(1) … (2) …", lines, or plain sentences.
+ * One card per step, at most 3, each cut to a short instruction (the prompt asks for ≤10 words,
+ * but older or wordier results still need to fit a phone card).
+ */
 function splitSteps(text: string): string[] {
-  const lines = text.split(/\n+|\s*(?=\b\d[.)]\s)/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean);
-  const parts = lines.length > 1 ? lines : text.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
-  return parts.slice(0, 4);
+  const numbered = text.split(/\s*(?:\(\d{1,2}\)|\b\d{1,2}[.)](?=\s))\s*|\n+/);
+  let parts = numbered.length > 1 ? numbered : text.split(/(?<=[.!?])\s+/);
+  // Anything before step 1 is a greeting or preamble ("Siti, thank you… Please:"), not a step.
+  if (numbered.length > 1 && !/^\s*(?:\(?\d|[-•*])/.test(text)) parts = parts.slice(1);
+  return parts
+    .map((p) => shortStep(p.replace(/^\s*[-•*]\s*/, "")))
+    .filter((p) => p && !/^(thank|terima kasih|salamat)/i.test(p))
+    .slice(0, 3);
+}
+
+/** First sentence, before any ";" or " - " aside, and no more than ~14 words of whole clauses. */
+function shortStep(step: string) {
+  const first = step.split(/(?<=[.!?])\s+/)[0].split(/;|\s[-–—]\s/)[0];
+  let out = "";
+  for (const clause of first.split(/,\s*/)) {
+    const next = out ? `${out}, ${clause}` : clause;
+    if (out && next.split(/\s+/).length > 14) break;
+    out = next;
+  }
+  return out.replace(/[\s,;:(]+$/, "").replace(/[^.!?]$/, "$&.").trim();
 }
 
 function CareSteps({ t, steps }: { t: Dict; steps: string[] }) {

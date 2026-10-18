@@ -147,7 +147,7 @@ Return ONLY a JSON object with exactly these keys:
   "worth_reviewing": ["short items a GP may want to check, phrased as questions, no diagnoses"],
   "red_flags": ["any red-flag phrases found in notes, empty if none"],
   "family_message": "2-3 kind sentences for the family in English, with one clear next step",
-  "helper_message": "message in the helper's language",
+  "helper_message": "one or two short sentences (under 25 words) in the helper's language: what to watch for today",
   "helper_message_en": "English translation of helper_message",
   "carer_wellbeing": "one sentence about the helper's own wellbeing, or empty string. Don't state the number of days without rest; the app shows that figure next to this sentence"
 }`;
@@ -213,14 +213,14 @@ Rules:
 - GP checks are phrased as questions, e.g. "Is a lying and standing blood pressure check worthwhile given the dizziness?", "Would a nutrition screen such as MNA-SF help?", "Is a falls risk review due?".
 - Use the patient's medications list (senior.medications) and the camera's stand_findings. If she takes a blood-pressure medicine and notes mention dizziness or low fluid intake, include a GP check on standing blood pressure and on whether a medication review is due. If she pushed up with her hands, a falls-risk review question fits. Never name a medicine change.
 - Call the sg_care_resources tool to find support services. Only list resources whose id the tool returned; never write phone numbers yourself.
-- The helper text goes in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words, with at most 3 steps.
+- The helper text goes in the helper's language (carer.language: id = Bahasa Indonesia, tl = Tagalog, en = English), in simple, warm words. Exactly 3 steps, each one short instruction of at most 10 words, starting with a verb. No greeting, no thanks, no explanation: it is shown as 3 numbered cards on a phone.
 
 Return ONLY a JSON object with exactly these keys:
 {
   "focus_areas": [{"area": "Eating", "why": "one sentence tied to the numbers", "family_actions": ["at most 3"], "helper_actions": ["at most 3, in English"]}],
   "gp_checks": ["at most 4 questions for the GP"],
   "escalation": {"see_gp": "now" | "within_3_days" | "next_routine_visit", "call_995_if": ["specific warning signs to watch for"]},
-  "helper_care_tips": "steps in the helper's language",
+  "helper_care_tips": "1. step\n2. step\n3. step (in the helper's language, at most 10 words each)",
   "helper_care_tips_en": "English translation of helper_care_tips",
   "resources": [{"id": "aic", "why": "one sentence on why it helps this family"}]
 }`;
