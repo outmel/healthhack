@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import { Wordmark } from "@/components/Shell";
-
-const DEMO_PASSWORD = "teman2026";
+import { DEMO_PASSWORD, setTour } from "@/lib/demo";
 
 const STEPS = [
-  { title: "Siti snaps, films or speaks", desc: "A meal photo, a 30-second stand test, or a voice note in her own language." },
+  { title: "Siti snaps, counts or speaks", desc: "A meal photo, a quick 5-stand chair test, or a voice note in her own language." },
   { title: "Teman compares with her usual", desc: "Every reading is checked against Mum’s own normal, not a textbook average." },
   { title: "Family and GP get a clear alert", desc: "Plain words for the family, a one-page trend summary for the doctor." },
 ];
@@ -22,6 +21,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [reset, setReset] = useState<"idle" | "busy" | "done" | "error">("idle");
+
+  async function resetDemo() {
+    setReset("busy");
+    const res = await fetch("/api/demo/reset", { method: "POST" }).catch(() => null);
+    setReset(res?.ok ? "done" : "error");
+  }
+
+  function startTour() {
+    setTour(true);
+    login("siti@teman.demo", DEMO_PASSWORD);
+  }
 
   async function login(e: string, p: string) {
     setBusy(e);
@@ -41,22 +52,26 @@ export default function LoginPage() {
         <div className="mx-auto max-w-[1120px] px-6 pb-[72px] pt-7">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Wordmark light />
-            <span className="text-[15px] text-cream/80">Teman = “friend” in Malay &amp; Bahasa</span>
+            <span className="text-[15px] text-cream/80">Teman = “friend” in Malay &amp; Indonesian</span>
           </div>
           <h1 className="mt-12 max-w-3xl text-[40px] font-extrabold leading-[1.08] tracking-tight sm:text-[52px]">
             The helper sees it first.{" "}
-            <span className="text-turmeric">Teman makes sure everyone else does too.</span>
+            <span className="text-turmeric">Teman makes sure everyone else sees it too.</span>
           </h1>
           <p className="mt-5 max-w-2xl text-lg leading-relaxed text-cream/85">
             In Singapore, a live-in helper often notices first when an older parent starts eating less or getting slower. Teman turns
             what she sees into a clear signal for the family and the GP, before it becomes a fall or a hospital stay.
           </p>
-          <a
-            href="#roles"
-            className="mt-7 inline-flex min-h-[52px] items-center rounded-2xl bg-turmeric px-6 text-[17px] font-extrabold text-sun-deep hover:brightness-105"
-          >
-            Start guided demo →
-          </a>
+          <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-3">
+            <button
+              onClick={startTour}
+              disabled={!!busy}
+              className="inline-flex min-h-[52px] items-center rounded-2xl bg-turmeric px-6 text-[17px] font-extrabold text-sun-deep hover:brightness-105 disabled:opacity-70"
+            >
+              {busy === "siti@teman.demo" ? "Opening…" : "Start guided demo →"}
+            </button>
+            <span className="text-[15px] text-cream/80">3 steps, about 2 minutes: Siti logs it, Rachel is alerted, Dr Lim sees the trend.</span>
+          </div>
         </div>
       </section>
 
@@ -78,7 +93,10 @@ export default function LoginPage() {
               <button
                 key={e}
                 disabled={!!busy}
-                onClick={() => login(e, DEMO_PASSWORD)}
+                onClick={() => {
+                  setTour(false);
+                  login(e, DEMO_PASSWORD);
+                }}
                 className={`flex flex-col items-start gap-3 rounded-[22px] bg-paper p-5 text-left transition hover:-translate-y-0.5 disabled:opacity-60 ${
                   featured ? "border-2 border-brand" : "border border-line hover:border-brand/50"
                 }`}
@@ -104,6 +122,14 @@ export default function LoginPage() {
           {error && !email && <p className="mt-3 text-coral">{error}</p>}
 
           <p className="mt-5 text-[15px] text-muted">All data is made up for this demo. One tap signs you in; no password needed.</p>
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[15px] text-muted">
+            Someone tried it before you? Everyone shares one demo household.
+            <button onClick={resetDemo} disabled={reset === "busy"} className="font-bold text-brand underline underline-offset-4 disabled:opacity-60">
+              {reset === "busy" ? "Resetting… (a few seconds)" : "Reset demo"}
+            </button>
+            {reset === "done" && <span role="status" className="font-semibold text-brand-dark">Done. Fresh story loaded.</span>}
+            {reset === "error" && <span role="status" className="font-semibold text-coral">Couldn&apos;t reset. Try again.</span>}
+          </p>
 
           <details className="mt-6 max-w-md rounded-[22px] border border-line bg-paper p-4">
             <summary className="cursor-pointer font-semibold text-muted">Sign in with email instead</summary>

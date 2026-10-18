@@ -15,6 +15,9 @@ export const RECENT_DAYS = 3;
 export const LAG_DAYS = 7;
 export const Z_THRESHOLD = 1.5;
 export const MIN_SD: Record<Signal, number> = { meal: 4, mobility: 0.6 };
+/** Plausible 5× sit-to-stand times. Readings outside are refused on save and ignored here. */
+export const MIN_STAND_S = 6;
+export const MAX_STAND_S = 120;
 
 export type Signal = "meal" | "mobility";
 export const SIGNALS: Signal[] = ["meal", "mobility"];
@@ -119,8 +122,9 @@ export async function dailySeries(db: Db, seniorId: number, type: Signal): Promi
     `SELECT to_char(created_at AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS day, avg(value)::float AS value
        FROM observations
       WHERE senior_id = $1 AND type = $2 AND value IS NOT NULL
+        AND (type <> 'mobility' OR value BETWEEN $3 AND $4)
       GROUP BY 1 ORDER BY 1`,
-    [seniorId, type],
+    [seniorId, type, MIN_STAND_S, MAX_STAND_S],
   );
   return rows as DailyPoint[];
 }

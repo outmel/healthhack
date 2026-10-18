@@ -8,7 +8,10 @@ export async function POST() {
   const session = await getSession();
   if (session?.role !== "gp") return NextResponse.json({ error: "GPs only" }, { status: 403 });
   const url = process.env.N8N_WEBHOOK_URL;
-  if (!url) return NextResponse.json({ error: "N8N_WEBHOOK_URL is not set" }, { status: 500 });
+  if (!url) {
+    console.error("N8N_WEBHOOK_URL is not set");
+    return NextResponse.json({ error: "The AI service isn't set up yet." }, { status: 503 });
+  }
 
   const senior = await getSenior(session.household);
   try {
@@ -18,10 +21,14 @@ export async function POST() {
       body: JSON.stringify({ senior_id: senior.id }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!res.ok) return NextResponse.json({ error: `n8n returned ${res.status}` }, { status: 502 });
+    if (!res.ok) {
+      // 404 = workflow not active (production webhooks only exist while it's switched on).
+      console.error(`n8n analyse returned ${res.status}`);
+      return NextResponse.json({ error: "The AI service isn't available right now." }, { status: 502 });
+    }
     return NextResponse.json(await res.json());
   } catch (e) {
     console.error("n8n analyse failed", e);
-    return NextResponse.json({ error: "Analysis service unreachable" }, { status: 502 });
+    return NextResponse.json({ error: "The AI service isn't available right now." }, { status: 502 });
   }
 }

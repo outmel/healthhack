@@ -74,7 +74,9 @@ let lastRest = null;
 for (const c of carer) if (c.rested_today) lastRest = c.date;
 const firstCheckin = carer.length ? carer[0].date : null;
 const since = lastRest || firstCheckin;
-const daysSinceRest = since ? Math.floor((Date.now() - new Date(since).getTime()) / 864e5) : null;
+// Singapore calendar days (today minus the rest day), the same rule as getCarerStatus in the app.
+const sgToday = new Date(Date.now() + 8 * 36e5).toISOString().slice(0, 10);
+const daysSinceRest = since ? Math.round((Date.parse(sgToday) - Date.parse(String(since).slice(0, 10))) / 864e5) : null;
 const recentMoods = carer.slice(-7).map(c => c.mood).filter(m => m != null);
 
 return [{ json: {
@@ -147,7 +149,7 @@ Return ONLY a JSON object with exactly these keys:
   "family_message": "2-3 kind sentences for the family in English, with one clear next step",
   "helper_message": "message in the helper's language",
   "helper_message_en": "English translation of helper_message",
-  "carer_wellbeing": "one sentence about the helper's own wellbeing, or empty string"
+  "carer_wellbeing": "one sentence about the helper's own wellbeing, or empty string. Don't state the number of days without rest; the app shows that figure next to this sentence"
 }`;
 
 // Dates are bucketed in Singapore time to match the app's charts.

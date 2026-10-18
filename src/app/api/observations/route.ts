@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getSenior, getStandComparison } from "@/lib/data";
-import { recompute } from "@/lib/baseline";
+import { MAX_STAND_S, MIN_STAND_S, recompute } from "@/lib/baseline";
 import { translateNote } from "@/lib/ai";
 
 export async function POST(req: Request) {
@@ -16,6 +16,11 @@ export async function POST(req: Request) {
   if (body.type === "meal" || body.type === "mobility") {
     const value = Number(body.value);
     if (!Number.isFinite(value) || value <= 0) return NextResponse.json({ error: "value required" }, { status: 400 });
+    // Five full stands in under 6 s isn't physically plausible for a frail senior (a quick test
+    // tap-through); over 2 minutes means the timer was left running. Neither enters her baseline.
+    if (body.type === "mobility" && (value < MIN_STAND_S || value > MAX_STAND_S)) {
+      return NextResponse.json({ error: "implausible", code: value < MIN_STAND_S ? "too_fast" : "too_slow" }, { status: 422 });
+    }
     const meta = body.meta && typeof body.meta === "object" ? body.meta : {};
     // ~35 KB is plenty for a 13-joint, 10 fps track; refuse anything that looks like video.
     if (JSON.stringify(meta).length > 120_000) return NextResponse.json({ error: "meta too large" }, { status: 413 });

@@ -9,9 +9,17 @@ import { estimatePlate } from "@/lib/ai";
 
 const TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 type MediaType = (typeof TYPES)[number];
+const MAX_BYTES = 12 * 1024 * 1024;
+
+class BadPhoto extends Error {
+  constructor(public code: "not_image" | "too_big") {
+    super(code);
+  }
+}
 
 async function toImg(f: FormDataEntryValue | null) {
-  if (!(f instanceof File) || !TYPES.includes(f.type as MediaType)) throw new Error("Expected a JPEG/PNG/WebP image");
+  if (!(f instanceof File) || !TYPES.includes(f.type as MediaType)) throw new BadPhoto("not_image");
+  if (f.size > MAX_BYTES) throw new BadPhoto("too_big");
   return { data: Buffer.from(await f.arrayBuffer()).toString("base64"), mediaType: f.type as MediaType };
 }
 
@@ -24,9 +32,14 @@ export async function POST(req: Request) {
   try {
     estimate = await estimatePlate(await toImg(form.get("before")), await toImg(form.get("after")));
   } catch (e) {
+    if (e instanceof BadPhoto) return NextResponse.json({ error: e.message, code: e.message }, { status: 422 });
     console.error("plate estimate failed", e);
     return NextResponse.json({ error: String((e as Error).message) }, { status: 502 });
   }
+
+  // Not a meal (or two different meals): tell the helper, save nothing.
+  if (!estimate.is_food) return NextResponse.json({ error: "These photos don't show a meal", code: "not_food" }, { status: 422 });
+  if (!estimate.same_meal) return NextResponse.json({ error: "The photos show different meals", code: "not_same" }, { status: 422 });
 
   // Shown to users in 25% buckets; the raw estimate is kept for the GP chart.
   const bucket = Math.round(estimate.percent_eaten / 25) * 25;

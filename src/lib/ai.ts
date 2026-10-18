@@ -1,4 +1,4 @@
-// DeepSeek calls (OpenAI-compatible API): plate estimate (vision) and helper-note translation.
+// DeepSeek calls (OpenAI-compatible API): plate estimate (vision), helper-note translation and family-to-helper messages.
 import OpenAI from "openai";
 import { z } from "zod";
 
@@ -9,6 +9,9 @@ const getClient = () => (client ??= new OpenAI({ apiKey: process.env.DEEPSEEK_AP
 
 const Box = z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]);
 const PlateEstimate = z.object({
+  // Checked before anything is saved: a screenshot or a selfie must never become "ate 0%".
+  is_food: z.boolean().catch(true),
+  same_meal: z.boolean().catch(true),
   percent_eaten: z.coerce.number().min(0).max(100),
   confidence: z.enum(["low", "medium", "high"]),
   note: z.string(),
@@ -61,7 +64,7 @@ export async function estimatePlate(before: Img, after: Img): Promise<PlateEstim
     {
       role: "system",
       content:
-        'You estimate how much of a meal an elderly person ate from before/after photos. Reply with JSON only: {"percent_eaten": number 0-100, "confidence": "low" | "medium" | "high", "note": "one short sentence on what was left", "leftovers": [{"label": "rice", "box": [x, y, w, h]}]}. Boxes are on the AFTER photo, as fractions 0-1 of its width and height, x,y = top-left corner.',
+        'You estimate how much of a meal an elderly person ate from before/after photos. Reply with JSON only: {"is_food": boolean, "same_meal": boolean, "percent_eaten": number 0-100, "confidence": "low" | "medium" | "high", "note": "one short sentence on what was left", "leftovers": [{"label": "rice", "box": [x, y, w, h]}]}. Boxes are on the AFTER photo, as fractions 0-1 of its width and height, x,y = top-left corner.',
     },
     {
       role: "user",
@@ -72,7 +75,7 @@ export async function estimatePlate(before: Img, after: Img): Promise<PlateEstim
         { type: "image_url", image_url: { url: url(after) } },
         {
           type: "text",
-          text: "Estimate what percentage of the food (by volume) was eaten. Ignore garnish, bones and inedible items. If the photos don't show the same meal, say so in the note and use low confidence. In leftovers, draw one tight box around each food that was not eaten on the AFTER photo, labelled in one or two plain English words; use [] if the plate is clean or you are unsure where the food is.",
+          text: "First check the photos. is_food = true only if photo 1 shows a plate, bowl or tray of food and photo 2 shows a plate, bowl or tray (it may be empty). Screenshots, documents, people, rooms and other non-food photos are false. same_meal = false if the two photos clearly show different dishes or different plates. If either is false, set percent_eaten to 0. Then estimate what percentage of the food (by volume) was eaten. Ignore garnish, bones and inedible items. If the photos don't show the same meal, say so in the note and use low confidence. In leftovers, draw one tight box around each food that was not eaten on the AFTER photo, labelled in one or two plain English words; use [] if the plate is clean or you are unsure where the food is.",
         },
       ],
     },
@@ -88,4 +91,19 @@ export async function translateNote(text: string, lang: string): Promise<Transla
     },
     { role: "user", content: `Language code: ${lang}\nNote: ${text}` },
   ]);
+}
+
+const LANG_NAMES: Record<string, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
+
+/** A family member's message to the helper, in the helper's own language. */
+export async function translateForHelper(text: string, lang: string): Promise<string> {
+  if (lang === "en") return text;
+  const { translated } = await chatJson(z.object({ translated: z.string().min(1) }), [
+    {
+      role: "system",
+      content: `You translate short messages from a Singapore family to their live-in domestic helper. Translate into simple, warm, natural ${LANG_NAMES[lang] ?? lang}. Keep names as they are and refer to the elderly person the way a helper would (e.g. "Ibu" in Bahasa Indonesia, "Lola" or "Ma'am" in Tagalog). Reply with JSON only: {"translated": string}.`,
+    },
+    { role: "user", content: text },
+  ]);
+  return translated;
 }

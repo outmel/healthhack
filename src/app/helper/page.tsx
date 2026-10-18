@@ -1,19 +1,21 @@
 import { requireRole } from "@/lib/auth";
-import { getCarerStatus, getChecksThisMonth, getCircle, getLatestAnalysis, getRestDay, getSenior, getToday } from "@/lib/data";
+import { getCarerStatus, getChecksThisMonth, getCircle, getLatestAnalysis, getMessages, getRestDay, getSenior, getToday } from "@/lib/data";
 import HelperApp from "./HelperApp";
 import type { Lang } from "@/lib/i18n";
 
 export default async function HelperPage() {
   const session = await requireRole("helper");
   const senior = await getSenior(session.household);
-  const [ai, today, carer, checks, restDay, circle] = await Promise.all([
+  const [ai, today, carer, checks, restDay, circle, messages] = await Promise.all([
     getLatestAnalysis(senior.id),
     getToday(senior.id, session.uid),
     getCarerStatus(session.household),
     getChecksThisMonth(senior.id),
     getRestDay(session.household),
     getCircle(session.household),
+    getMessages(session.uid, 1),
   ]);
+  const message = messages[0] ?? null;
   return (
     <HelperApp
       name={session.name}
@@ -25,6 +27,10 @@ export default async function HelperPage() {
       checks={checks}
       restDay={restDay}
       circle={circle}
+      careSteps={ai?.care_plan?.helper_care_tips && !ai.care_plan.parse_error
+        ? { text: ai.care_plan.helper_care_tips, en: ai.care_plan.helper_care_tips_en ?? "" }
+        : null}
+      message={message && { from: message.from_name, text: message.translated_text ?? message.original_text, original: message.original_text }}
     />
   );
 }

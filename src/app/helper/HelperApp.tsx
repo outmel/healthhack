@@ -10,7 +10,7 @@ import { agoLabel, sgToday } from "@/lib/format";
 import LogoutButton from "@/components/LogoutButton";
 import StandReplay from "@/components/StandReplay";
 import { StatusPill, Wordmark } from "@/components/Shell";
-import { Bulb, Calendar, Camera, Chair, Check, ChevronLeft, ChevronRight, Mic, Phone, Play, Users, Utensils } from "@/components/icons";
+import { Bulb, Calendar, Camera, Chair, Check, ChevronLeft, ChevronRight, Heart, Message, Mic, Phone, Play, Users, Utensils } from "@/components/icons";
 import PoseStandTest, { type PoseResult } from "./PoseStandTest";
 
 type Screen = "home" | "meal" | "stand" | "voice";
@@ -20,12 +20,13 @@ type IconT = (p: { className?: string }) => React.ReactElement;
 const TZ = "Asia/Singapore";
 const LANG_NAME: Record<Lang, string> = { id: "Bahasa Indonesia", tl: "Tagalog", en: "English" };
 type Circle = { family: string; gp: string };
+type FamilyMessage = { from: string; text: string; original: string } | null;
 
 export default function HelperApp({
-  name, seniorName, initialLang, initialDone, daysWithoutRest, tip, checks: initialChecks, restDay, circle,
+  name, seniorName, initialLang, initialDone, daysWithoutRest, tip, checks: initialChecks, restDay, circle, message, careSteps,
 }: {
   name: string; seniorName: string; initialLang: Lang; initialDone: Done; daysWithoutRest: number | null; tip: Tip;
-  checks: number; restDay: { day: string; set_by: string } | null; circle: Circle;
+  checks: number; restDay: { day: string; set_by: string } | null; circle: Circle; message: FamilyMessage; careSteps: Tip;
 }) {
   const [lang, setLang] = useState<Lang>(initialLang in DICTS ? initialLang : "id");
   const [screen, setScreen] = useState<Screen>("home");
@@ -100,6 +101,20 @@ export default function HelperApp({
                   .replace("{name}", restDay.set_by)}
               </p>
             )}
+            {message && (
+              <section className="rounded-[22px] border-2 border-rose bg-paper p-4">
+                <p className="eyebrow flex items-center gap-1.5 text-rose">
+                  <Message className="h-4 w-4" /> {t.messageFrom.replace("{name}", message.from)}
+                </p>
+                <p className="mt-1.5 text-[19px] font-bold leading-snug text-ink">{lang === "en" ? message.original : message.text}</p>
+                {lang !== "en" && message.text !== message.original && (
+                  <details className="mt-2 text-[15px] text-muted">
+                    <summary className="cursor-pointer font-semibold">{t.showOriginal}</summary>
+                    <p className="mt-1">{message.original}</p>
+                  </details>
+                )}
+              </section>
+            )}
             <section aria-label={t.todayTitle} className="flex flex-col gap-3">
               {tasks.map((k) => (
                 <TaskCard key={k.key} Icon={k.Icon} label={k.label} hint={k.hint} done={k.done} current={k.key === current} t={t} onClick={() => setScreen(k.key)} />
@@ -114,6 +129,8 @@ export default function HelperApp({
                 <p className="mt-1.5 text-[17px] leading-snug">{lang === "en" && tip.en ? tip.en : tip.text}</p>
               </section>
             )}
+
+            {careSteps && <CareSteps t={t} steps={splitSteps(lang === "en" && careSteps.en ? careSteps.en : careSteps.text)} />}
 
             <CheckIn t={t} name={name} done={done.checkin} daysWithoutRest={daysWithoutRest} onDone={() => markDone("checkin")} />
             <p className="text-center text-sm text-faint">{t.notDiagnosis}</p>
@@ -241,15 +258,34 @@ function MealCapture({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; 
   const [after, setAfter] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "busy" | "error">("idle");
   const [result, setResult] = useState<PlateResult | null>(null);
+  const [problem, setProblem] = useState("");
+
+  // Checks that need no AI: right kind of file, not huge, not the same photo twice.
+  function pick(which: "before" | "after", f: File) {
+    setProblem("");
+    setState("idle");
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return setProblem(t.notFood);
+    if (f.size > 12 * 1024 * 1024) return setProblem(t.photoTooBig);
+    const other = which === "before" ? after : before;
+    if (other && other.name === f.name && other.size === f.size && other.lastModified === f.lastModified) return setProblem(t.samePhoto);
+    (which === "before" ? setBefore : setAfter)(f);
+  }
 
   async function submit() {
     if (!before || !after) return;
     setState("busy");
+    setProblem("");
     const fd = new FormData();
     fd.set("before", before);
     fd.set("after", after);
-    const res = await fetch("/api/plate", { method: "POST", body: fd });
-    if (!res.ok) return setState("error");
+    const res = await fetch("/api/plate", { method: "POST", body: fd }).catch(() => null);
+    if (!res?.ok) {
+      const code = res ? (await res.json().catch(() => ({}))).code : undefined;
+      const msg = { not_food: t.notFood, not_image: t.notFood, not_same: t.notSamePlate, too_big: t.photoTooBig }[code as string];
+      setState(msg ? "idle" : "error");
+      if (msg) setProblem(msg);
+      return;
+    }
     setResult(await res.json());
     setState("idle");
     onSaved();
@@ -284,9 +320,10 @@ function MealCapture({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; 
   return (
     <Screen title={t.meal} Icon={Utensils} onBack={onBack} t={t}>
       <div className="grid grid-cols-2 gap-3">
-        <PhotoPicker step={1} label={t.stepBefore} hint={t.takePhoto} file={before} onFile={setBefore} />
-        <PhotoPicker step={2} label={t.stepAfter} hint={t.takePhoto} file={after} onFile={setAfter} />
+        <PhotoPicker step={1} label={t.stepBefore} hint={t.takePhoto} file={before} onFile={(f) => pick("before", f)} />
+        <PhotoPicker step={2} label={t.stepAfter} hint={t.takePhoto} file={after} onFile={(f) => pick("after", f)} />
       </div>
+      {problem && <p role="alert" className="rounded-2xl bg-sun-soft p-3 text-center font-semibold text-sun-deep">{problem}</p>}
       <p className="text-center text-sm text-muted">{t.photosNotStored}</p>
       <button className={primary} disabled={!before || !after || state === "busy"} onClick={submit}>
         {state === "busy" ? t.working : t.estimate}
@@ -339,8 +376,9 @@ function PhotoPicker({ step, label, hint, file, onFile }: { step: number; label:
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   return (
     <label className="flex cursor-pointer flex-col gap-2">
-      <span className="flex items-center gap-2 font-bold">
-        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${file ? "bg-brand text-cream" : "bg-brand-soft text-brand-dark"}`}>
+      {/* Fixed two-line label height so the before/after boxes line up even when one label wraps. */}
+      <span className="flex min-h-12 items-start gap-2 font-bold leading-6">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm ${file ? "bg-brand text-cream" : "bg-brand-soft text-brand-dark"}`}>
           {file ? <Check className="h-4 w-4" /> : step}
         </span>
         {label}
@@ -357,7 +395,17 @@ function PhotoPicker({ step, label, hint, file, onFile }: { step: number; label:
         )}
       </span>
       {/* capture opens the camera on phones; desktop judges get a file picker */}
-      <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
     </label>
   );
 }
@@ -378,14 +426,23 @@ function StandTest({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; on
   const [saved, setSaved] = useState<StandSaved | null>(null);
   const [state, setState] = useState<"idle" | "busy" | "error">("idle");
   const [pending, setPending] = useState<Omit<StandSaved, "then" | "statuses"> & { meta: object } | null>(null);
+  const [problem, setProblem] = useState("");
 
   async function save(r: NonNullable<typeof pending>) {
     setPending(r);
+    setProblem("");
     setState("busy");
     const res = await fetch("/api/observations", {
       method: "POST",
       body: JSON.stringify({ type: "mobility", value: r.seconds, meta: r.meta }),
     }).catch(() => null);
+    if (res?.status === 422) {
+      // Not plausible (e.g. five stands in 3 s): not saved, so it can't skew her usual. Start over.
+      const { code } = await res.json().catch(() => ({}));
+      setProblem(code === "too_slow" ? t.standTooSlow : t.standTooFast);
+      setPending(null);
+      return setState("idle");
+    }
     if (!res?.ok) return setState("error");
     const data = await res.json();
     setSaved({ ...r, then: data.then ?? null, statuses: data.statuses });
@@ -454,6 +511,7 @@ function StandTest({ t, circle, onBack, onSaved }: { t: Dict; circle: Circle; on
 
   return (
     <Screen title={t.stand} Icon={Chair} onBack={onBack} t={t}>
+      {problem && <p role="alert" className="rounded-2xl bg-sun-soft p-3 text-center font-semibold text-sun-deep">{problem}</p>}
       {state === "busy" ? (
         <p className="rounded-[22px] bg-paper p-6 text-center text-lg font-bold text-muted ring-1 ring-line">{t.working}</p>
       ) : state === "error" && pending ? (
@@ -516,31 +574,85 @@ function TapStandTest({ t, onDone }: { t: Dict; onDone: (seconds: number, reps: 
   );
 }
 
-type SpeechRec = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void; onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void; onend: () => void };
+type SpeechRec = {
+  lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void;
+  onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+  onerror: (e: { error: string }) => void;
+  onend: () => void;
+};
 
 function VoiceNote({ t, lang, circle, onBack, onSaved }: { t: Dict; lang: Lang; circle: Circle; onBack: () => void; onSaved: () => void }) {
   const [text, setText] = useState("");
   const [concerns, setConcerns] = useState<string[]>([]);
   const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState(false);
   const [state, setState] = useState<"idle" | "busy" | "saved" | "error">("idle");
   const rec = useRef<SpeechRec | null>(null);
+  const wanted = useRef(false); // true from "start" until she taps stop
+  const textRef = useRef("");
   const w = typeof window !== "undefined" ? (window as unknown as Record<string, new () => SpeechRec>) : {};
   const Speech = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+  const updateText = (v: string) => {
+    textRef.current = v;
+    setText(v);
+  };
 
-  function toggle() {
-    if (listening) return rec.current?.stop();
+  // Browsers end recognition after a pause. While she hasn't tapped stop, start a new session
+  // and append to what's already there, so a pause never loses or replaces her words.
+  function listen() {
+    const base = textRef.current ? textRef.current.trimEnd() + " " : "";
     const r = new Speech();
     r.lang = SPEECH_LOCALE[lang];
     r.interimResults = true;
     r.continuous = true;
-    r.onresult = (e) => setText(Array.from(e.results).map((res) => res[0].transcript).join(" "));
-    r.onend = () => setListening(false);
+    r.onresult = (e) => updateText(base + Array.from(e.results).map((res) => res[0].transcript).join(" ").trim());
+    r.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") {
+        wanted.current = false;
+        setMicError(true);
+      }
+    };
+    r.onend = () => {
+      if (wanted.current) {
+        try {
+          return listen();
+        } catch {
+          wanted.current = false;
+        }
+      }
+      setListening(false);
+    };
     rec.current = r;
     r.start();
-    setListening(true);
   }
 
+  function toggle() {
+    if (wanted.current) {
+      wanted.current = false;
+      rec.current?.stop();
+      setListening(false);
+      return;
+    }
+    setMicError(false);
+    wanted.current = true;
+    setListening(true);
+    try {
+      listen();
+    } catch {
+      wanted.current = false;
+      setListening(false);
+      setMicError(true);
+    }
+  }
+
+  // Stop the microphone when leaving the screen.
+  useEffect(() => () => {
+    wanted.current = false;
+    rec.current?.stop();
+  }, []);
+
   async function save() {
+    if (wanted.current) toggle();
     setState("busy");
     const res = await fetch("/api/observations", { method: "POST", body: JSON.stringify({ type: "voice", text, lang }) });
     if (res.ok) setConcerns((await res.json()).concerns ?? []);
@@ -579,18 +691,24 @@ function VoiceNote({ t, lang, circle, onBack, onSaved }: { t: Dict; lang: Lang; 
       <p className="text-[17px] leading-snug text-body">{t.voiceIntro}</p>
       {Speech && (
         <button
+          type="button"
           onClick={toggle}
-          className={`flex flex-col items-center gap-3 rounded-[22px] border border-line bg-paper py-7 text-xl font-extrabold ${listening ? "text-brand-dark" : "text-brand"}`}
+          aria-pressed={listening}
+          className={`flex select-none flex-col items-center gap-3 rounded-[22px] border py-7 text-xl font-extrabold transition ${listening ? "border-coral bg-coral-soft text-coral" : "border-line bg-paper text-brand"}`}
         >
-          <span className={`flex h-20 w-20 items-center justify-center rounded-full ${listening ? "animate-pulse bg-brand text-cream" : "border-2 border-brand"}`}>
-            <Mic className="h-9 w-9" />
+          <span className={`flex h-20 w-20 items-center justify-center rounded-full ${listening ? "bg-coral text-white" : "border-2 border-brand"}`}>
+            {listening ? <span className="h-7 w-7 rounded-md bg-white" aria-hidden /> : <Mic className="h-9 w-9" />}
           </span>
-          {listening ? t.recording : t.record}
+          <span className="flex items-center gap-2">
+            {listening && <span className="h-3 w-3 animate-pulse rounded-full bg-coral" aria-hidden />}
+            {listening ? t.recording : t.record}
+          </span>
         </button>
       )}
+      {micError && <p role="alert" className="rounded-2xl bg-sun-soft p-3 text-center font-semibold text-sun-deep">{t.micBlocked}</p>}
       <label className="flex flex-col gap-2">
         <span className="font-bold">{t.orType}</span>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="rounded-[22px] border border-line bg-paper p-4 text-[17px]" />
+        <textarea value={text} onChange={(e) => updateText(e.target.value)} rows={4} className="rounded-[22px] border border-line bg-paper p-4 text-[17px]" />
       </label>
       <button className={primary} disabled={!text.trim() || state === "busy"} onClick={save}>{state === "busy" ? t.working : t.save}</button>
       {state === "error" && <p className="rounded-2xl bg-coral-soft p-3 text-center font-semibold text-coral">{t.failed}</p>}
@@ -649,6 +767,32 @@ function CheckIn({ t, name, done, daysWithoutRest, onDone }: { t: Dict; name: st
         </div>
       )}
       {restLine}
+    </section>
+  );
+}
+
+/** The care plan's tips arrive as one string ("1. ... 2. ..." or sentences); one card per step. */
+function splitSteps(text: string): string[] {
+  const lines = text.split(/\n+|\s*(?=\b\d[.)]\s)/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean);
+  const parts = lines.length > 1 ? lines : text.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+  return parts.slice(0, 4);
+}
+
+function CareSteps({ t, steps }: { t: Dict; steps: string[] }) {
+  if (!steps.length) return null;
+  return (
+    <section aria-labelledby="care-steps" className="flex flex-col gap-2">
+      <h2 id="care-steps" className="eyebrow flex items-center gap-1.5 px-1 text-brand">
+        <Heart className="h-4 w-4" /> {t.careSteps}
+      </h2>
+      <ol className="flex flex-col gap-2">
+        {steps.map((step, i) => (
+          <li key={step} className="flex items-start gap-3 rounded-[22px] border border-line bg-paper p-4">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-lg font-extrabold text-brand-dark">{i + 1}</span>
+            <span className="pt-1 text-[17px] font-semibold leading-snug text-ink">{step}</span>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

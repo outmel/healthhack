@@ -3,8 +3,8 @@ import { Card } from "@/components/Shell";
 import CareTimeline from "@/components/CareTimeline";
 import StandReplay from "@/components/StandReplay";
 import {
-  getAlerts, getCarerStatus, getLatestAnalysis, getLeadTime, getRestDay, getSignals, getStandComparison,
-  getStandTests, getVoiceNotes, sgDay, type Senior,
+  getAlerts, getCarerStatus, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSignals, getStandComparison,
+  getStandTests, getVoiceNotes, LANG_EN, sgDay, type Senior,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
 import { formatReps } from "@/lib/pose";
@@ -21,7 +21,7 @@ const FALLS_CUTOFF: Reference = { value: 15, label: "Falls-risk cut-off" };
 const BUATOIS = "https://pubmed.ncbi.nlm.nih.gov/18808608/";
 
 export default async function PatientReport({ senior, household, readOnly = false }: { senior: Senior; household: number; readOnly?: boolean }) {
-  const [signals, alerts, notes, analysis, carer, tests, restDay] = await Promise.all([
+  const [signals, alerts, notes, analysis, carer, tests, restDay, helper] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 40),
@@ -29,7 +29,9 @@ export default async function PatientReport({ senior, household, readOnly = fals
     getCarerStatus(household),
     getStandTests(senior.id),
     getRestDay(household),
+    getHelper(household),
   ]);
+  const helperLang = LANG_EN[helper?.language ?? "id"] ?? "her language";
   const replay = readOnly ? null : await getStandComparison(senior.id, signals.mobility.series);
   const alert = alerts[0];
   const booked = alerts.find((a) => a.gp_review_at);
@@ -66,7 +68,7 @@ export default async function PatientReport({ senior, household, readOnly = fals
           <dl className="mt-3 flex flex-col gap-2.5">
             <Row label="Conditions">{senior.conditions.length ? senior.conditions.join(", ") : "None recorded"}</Row>
             <Row label="Medications">{senior.medications.length ? senior.medications.join(", ") : "None recorded"}</Row>
-            {carer && <Row label="Helper">{carer.name} · notes in Bahasa, translated</Row>}
+            {carer && <Row label="Helper">{carer.name} · {helperLang === "English" ? "notes in English" : `notes in ${helperLang}, translated`}</Row>}
             {lastUpdate && <Row label="Last update">{day(lastUpdate)}</Row>}
             {booked?.gp_review_at && <Row label="GP review">Booked by family for {fmtDay(sgDay(booked.gp_review_at))}</Row>}
           </dl>

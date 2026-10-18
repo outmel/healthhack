@@ -8,7 +8,12 @@ export type Alert = {
   id: number; signals: string[]; severity: string; message: string; created_at: string; acknowledged: boolean;
   gp_review_at: string | null;
 };
-export type VoiceNote = { id: number; original_text: string; translated_text: string | null; created_at: string; concerns: string[] };
+export type VoiceNote = { id: number; original_text: string; translated_text: string | null; created_at: string; concerns: string[]; lang: string };
+
+/** "translated from Indonesian", named from the note's own language (never just "Bahasa"). */
+export const LANG_EN: Record<string, string> = { id: "Indonesian", tl: "Tagalog", en: "English" };
+export const translatedFrom = (lang: string) =>
+  lang === "en" ? "written in English" : `translated from ${LANG_EN[lang] ?? "her language"}`;
 
 export async function getSenior(household: number): Promise<Senior> {
   return getSeniorById(household, "household_id");
@@ -33,7 +38,7 @@ export const getAlerts = (seniorId: number) =>
 
 export const getVoiceNotes = (seniorId: number, limit = 10) =>
   query<VoiceNote>(
-    `SELECT id, original_text, translated_text, created_at,
+    `SELECT id, original_text, translated_text, created_at, COALESCE(meta->>'lang', 'id') AS lang,
             COALESCE(ARRAY(SELECT jsonb_array_elements_text(meta->'concerns')), '{}') AS concerns
        FROM observations
       WHERE senior_id = $1 AND type = 'voice' ORDER BY created_at DESC LIMIT $2`,
@@ -106,6 +111,27 @@ export async function getRestDay(household: number) {
   return row ?? null;
 }
 
+/** The helper's language, for labelling her notes and translating messages to her. */
+export async function getHelper(household: number) {
+  const [row] = await query<{ id: number; name: string; language: string }>(
+    `SELECT id, name, language FROM users WHERE household_id = $1 AND role = 'helper' LIMIT 1`,
+    [household],
+  );
+  return row ?? null;
+}
+
+export type Message = { id: number; from_name: string; original_text: string; translated_text: string | null; lang: string; created_at: string };
+
+/** The family's messages to the helper from the last week (newest first). */
+export const getMessages = (helperId: number, limit = 3) =>
+  query<Message>(
+    `SELECT m.id, u.name AS from_name, m.original_text, m.translated_text, m.lang, m.created_at
+       FROM messages m JOIN users u ON u.id = m.from_user
+      WHERE m.to_user = $1 AND m.created_at > now() - interval '7 days'
+      ORDER BY m.created_at DESC LIMIT $2`,
+    [helperId, limit],
+  );
+
 /** Names of the family member and GP, for "Rachel and Dr Lim can now see this". */
 export async function getCircle(household: number) {
   const rows = await query<{ role: string; name: string }>(`SELECT role, name FROM users WHERE household_id = $1`, [household]);
@@ -123,21 +149,25 @@ export async function getChecksThisMonth(seniorId: number) {
   return row?.n ?? 0;
 }
 
-/** Helper wellbeing: days since last rest day and recent mood. */
+/**
+ * Helper wellbeing: days since last rest day and recent mood.
+ * Days are counted in Singapore calendar days (today minus the rest day's date), the same rule as
+ * the n8n "Compute baseline stats" node, so the card and the AI text never disagree by one.
+ */
 export async function getCarerStatus(household: number) {
-  const [row] = await query<{ name: string; last_rest: string | null; avg_mood: number | null; first: string }>(
+  const [row] = await query<{ name: string; days_without_rest: number | null; avg_mood: number | null }>(
     `SELECT u.name,
-            max(c.created_at) FILTER (WHERE c.rested_today) AS last_rest,
-            avg(c.mood) FILTER (WHERE c.created_at > now() - interval '7 days')::float AS avg_mood,
-            min(c.created_at) AS first
+            (now() AT TIME ZONE 'Asia/Singapore')::date
+              - (COALESCE(max(c.created_at) FILTER (WHERE c.rested_today), min(c.created_at)) AT TIME ZONE 'Asia/Singapore')::date
+              AS days_without_rest,
+            avg(c.mood) FILTER (WHERE c.created_at > now() - interval '7 days')::float AS avg_mood
        FROM users u LEFT JOIN carer_checkins c ON c.helper_id = u.id
       WHERE u.household_id = $1 AND u.role = 'helper'
       GROUP BY u.name`,
     [household],
   );
   if (!row) return null;
-  const since = row.last_rest ?? row.first;
-  const daysWithoutRest = since ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000) : 0;
+  const daysWithoutRest = row.days_without_rest ?? 0;
   return {
     name: row.name,
     daysWithoutRest,
@@ -150,6 +180,8 @@ export async function getCarerStatus(household: number) {
 export type Analysis = {
   urgency: "routine" | "review_soon" | "urgent";
   generated_at: string;
+  /** "prepared" = the ready-made summary saved by the demo seed; absent = a live n8n run. */
+  source?: "prepared";
   analysis: {
     headline?: string;
     gp_summary?: string;

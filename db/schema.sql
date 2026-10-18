@@ -1,5 +1,5 @@
 -- Teman schema. Six tables from the build plan; password_hash and meta are the only additions.
-DROP TABLE IF EXISTS rest_days, ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
+DROP TABLE IF EXISTS demo_meta, messages, rest_days, ai_analyses, carer_checkins, alerts, baselines, observations, seniors, users CASCADE;
 
 CREATE TABLE users (
   id            SERIAL PRIMARY KEY,
@@ -84,4 +84,21 @@ CREATE TABLE rest_days (
   set_by     INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (helper_id, day)
+);
+
+-- Family -> helper messages (POST /api/messages), translated into the helper's language.
+CREATE TABLE messages (
+  id              SERIAL PRIMARY KEY,
+  from_user       INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_user         INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  original_text   TEXT NOT NULL,
+  translated_text TEXT,           -- null if translation failed; the original is shown instead
+  lang            TEXT NOT NULL,  -- language of translated_text (the helper's language)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- When the demo story was last seeded (src/lib/demoSeed.ts), so it can refresh once a day.
+CREATE TABLE demo_meta (
+  seeded_on  DATE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

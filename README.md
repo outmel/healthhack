@@ -1,6 +1,6 @@
 # Teman
 
-Teman turns a domestic helper's phone into an early-warning system for a frail senior's decline. ("Teman" means companion in Malay and Indonesian.)
+Teman turns a domestic helper's phone into an early-warning system for a frail senior's decline. ("Teman" means friend in Malay and Indonesian.)
 
 **The helper sees it first. Teman makes sure everyone else sees it too.**
 
@@ -24,7 +24,7 @@ Password for all three: `teman2026`
 - **Then vs now** (`src/components/StandReplay.tsx`): a typical day from her baseline window as a grey ghost skeleton, the latest test in green, on one clock. Shown on the helper result screen, under "Standing up" on the family view and beside the chart for the GP.
 - **Plate leftovers**: DeepSeek vision also returns boxes around uneaten food on the after photo; drawn in amber only when confidence isn't low. Photos are never stored. The family view shows a week of plates filled to each day's intake.
 - **How early Teman noticed** (`firstFlag`, `driftStart`, `leadTime` in `src/lib/baseline.ts`): replays the engine day by day to find when the change began, when it was flagged and when the family was alerted. `src/components/CareTimeline.tsx` draws 28 days of plates, stands and notes with the flag day marked.
-- **Closing the loop**: "Book a GP visit" shares a read-only 1-page summary (`/summary/[token]`, signed, expires in 7 days) and records the review date (`POST /api/alerts/[id]/review`). "Give Siti Sunday off" writes `rest_days` (`POST /api/rest-day`); Siti sees it on her home screen and Dr Lim on the patient card.
+- **Closing the loop**: "Book a visit with Dr Lim" sends the clinic a ready-written message naming Dr Lim, with a read-only 1-page summary link (`/summary/[token]`, signed, expires in 7 days), and records the review date (`POST /api/alerts/[id]/review`). "Give Siti Sunday off" writes `rest_days` (`POST /api/rest-day`); Siti sees it on her home screen and Dr Lim on the patient card. "Message Siti" (`POST /api/messages`) translates Rachel's English into Siti's language with DeepSeek and shows it on Siti's home screen (original one tap away); if translation fails the English is delivered.
 - **Personal-baseline engine** (`src/lib/baseline.ts`): mean and SD of her own last 14 days of data, lagged by 7 days so a slow decline isn't absorbed into "normal". A signal is flagged when its 3-day average moves more than 1.5 SD the wrong way. Two signals flagged together raise a "review" alert for the family.
 - **Voice notes**: browser speech recognition (id-ID, fil-PH) or typed text, translated to English by DeepSeek; flagged concerns are stored with the note.
 
@@ -37,7 +37,19 @@ npm run seed                 # drops and recreates all tables with the Mdm Tan s
 npm run dev
 ```
 
-`npm run seed` resets everything (and applies the schema: `medications`, `alerts.gp_review_at`, `rest_days`). Run it before judging. It prints the baseline and z-score for each signal and exits non-zero if the combined alert doesn't fire.
+`npm run seed` resets everything (and applies the schema). It prints the baseline and z-score for each signal and exits non-zero if the combined alert doesn't fire. The story lives in `src/lib/demoSeed.ts` and is shared by three triggers:
+
+- `npm run seed` by hand.
+- **Reset demo** on the login page (`POST /api/demo/reset`). Everyone shares one household, so one visitor's "Yes, I rested" or test reading changes what the next sees; this puts it back.
+- **Daily refresh**: the story is dated relative to the seed day, so the first sign-in of each Singapore day re-seeds automatically (`ensureFreshDemo`, tracked in `demo_meta`). Set `DEMO_AUTO_RESET=off` to disable.
+
+The seed also saves one ready-made summary to `ai_analyses` (marked `source: "prepared"`, labelled "Prepared summary" in the UI), so the GP panel, Rachel's family message and Siti's "Tip for today" all show even if n8n is down. A live re-analysis replaces it; a failed one keeps it and says "Couldn't refresh, showing last summary."
+
+Chair-stand readings under 6 s or over 120 s aren't physically plausible; the API refuses them (Siti is asked to count again) and the baseline engine ignores any already stored.
+
+## Demo bar and guided demo
+
+Every signed-in page has a slim bar: "Viewing as Siti · Switch to Rachel / Dr Lim". "Start guided demo" on the login page signs in as Siti and walks through three steps in that bar: Siti logs lunch and the stand test, Rachel sees the alert (and can message Siti), Dr Lim sees the trend charts and summary.
 
 ## Tests and fixtures
 
@@ -71,7 +83,7 @@ Two n8n AI Agent nodes, each with its own DeepSeek chat model:
 
 The care plan appears on the GP panel and as "What you can do this week" on the family page.
 
-The models only explain the numbers; they never compute them. The safety nets live in code: a combined meal + mobility flag can't be downgraded to "routine", and red-flag words in notes (fall, chest pain, breathlessness, confusion, slurred speech, fainting, hard to wake, in English, Bahasa Indonesia and Tagalog) force "urgent" with 995 advice. In the care plan, "see GP" can't be softer than the urgency, and resources are kept only if their id is on the vetted list, with contact details filled in from that list (never from the model). The latest saved result shows instantly on the GP, family and helper views, so judging never waits on a live call.
+The models only explain the numbers; they never compute them. The safety nets live in code: a combined meal + mobility flag can't be downgraded to "routine", and red-flag words in notes (fall, chest pain, breathlessness, confusion, slurred speech, fainting, hard to wake, in English, Bahasa Indonesia and Tagalog) force "urgent" with 995 advice. In the care plan, "see GP" can't be softer than the urgency, and resources are kept only if their id is on the vetted list, with contact details filled in from that list (never from the model). The latest saved result shows instantly on the GP, family and helper views, so judging never waits on a live call (the seed saves one, see above).
 
 To change the workflow, edit `n8n/build-workflow.mjs` and run `node n8n/build-workflow.mjs`.
 
@@ -83,4 +95,4 @@ To change the workflow, edit `n8n/build-workflow.mjs` and run `node n8n/build-wo
    - **Teman Postgres** (Postgres): host `postgres.railway.internal`, port `5432`, database `railway`, user `postgres`, password = `PGPASSWORD` from the Railway Postgres service. SSL off.
    - **DeepSeek account** (DeepSeek credential type): your DeepSeek API key. Both chat model nodes use it.
    - **Teman webhook secret** (Header Auth): name `x-teman-secret`, value = `N8N_WEBHOOK_SECRET` from the Railway `web` service.
-4. Activate the workflow (production webhooks only run when it's active).
+4. Activate the workflow (production webhooks only run when it's active). Until it's active the webhook returns 404, and the GP panel keeps showing the last saved summary.

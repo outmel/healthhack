@@ -6,14 +6,15 @@ import { Message, Phone, Standing, Utensils } from "@/components/icons";
 import { requireRole } from "@/lib/auth";
 import type { DailyPoint, SignalStatus } from "@/lib/baseline";
 import {
-  getAlerts, getCarerStatus, getCircle, getLatestAnalysis, getLeadTime, getRestDay, getSenior, getSignals,
-  getStandComparison, getVoiceNotes, sgDay, type VoiceNote,
+  getAlerts, getCarerStatus, getCircle, getHelper, getLatestAnalysis, getLeadTime, getRestDay, getSenior, getSignals,
+  getStandComparison, getVoiceNotes, sgDay, translatedFrom, type VoiceNote,
 } from "@/lib/data";
 import { agoLabel, fmtDay, lastDays, sgToday } from "@/lib/format";
 import { formatReps } from "@/lib/pose";
 import { makeSummaryToken } from "@/lib/summaryToken";
 import CarerActions from "./CarerActions";
 import BookReview from "./BookReview";
+import ActionPlan from "@/components/ActionPlan";
 
 const TZ = "Asia/Singapore";
 const when = (d: string | Date) => new Date(d).toLocaleDateString("en-SG", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" });
@@ -33,7 +34,7 @@ const PICTO: Record<Level, string> = {
 export default async function FamilyPage() {
   const session = await requireRole("family");
   const senior = await getSenior(session.household);
-  const [signals, alerts, notes, carer, ai, restDay, circle] = await Promise.all([
+  const [signals, alerts, notes, carer, ai, restDay, circle, helperUser] = await Promise.all([
     getSignals(senior.id),
     getAlerts(senior.id),
     getVoiceNotes(senior.id, 40),
@@ -41,6 +42,7 @@ export default async function FamilyPage() {
     getLatestAnalysis(senior.id),
     getRestDay(session.household),
     getCircle(session.household),
+    getHelper(session.household),
   ]);
   const replay = await getStandComparison(senior.id, signals.mobility.series);
   const plan = ai?.care_plan?.parse_error ? undefined : ai?.care_plan;
@@ -122,12 +124,16 @@ export default async function FamilyPage() {
             </p>
           )}
           {alert?.severity === "review" && (
-            <BookReview
-              alertId={alert.id}
-              summaryPath={`/summary/${makeSummaryToken(senior.id)}`}
-              reviewDay={booked?.gp_review_at ? sgDay(booked.gp_review_at) : null}
-              gpName={circle.gp}
-            />
+            <div id="book-gp" className="scroll-mt-4">
+              <BookReview
+                alertId={alert.id}
+                summaryPath={`/summary/${makeSummaryToken(senior.id)}`}
+                reviewDay={booked?.gp_review_at ? sgDay(booked.gp_review_at) : null}
+                gpName={circle.gp}
+                seniorName={senior.name}
+                familyName={session.name}
+              />
+            </div>
           )}
         </div>
       </section>
@@ -246,7 +252,7 @@ export default async function FamilyPage() {
                     {n.concerns.map((c) => <span key={c} className="rounded-full bg-sun-soft px-2.5 py-0.5 text-sm font-semibold text-sun-deep">{c}</span>)}
                   </p>
                 )}
-                <p className="mt-1 text-sm text-faint">{when(n.created_at)} · translated from Bahasa</p>
+                <p className="mt-1 text-sm text-faint">{when(n.created_at)} · {translatedFrom(n.lang)}</p>
               </li>
             ))}
           </ul>
@@ -255,33 +261,11 @@ export default async function FamilyPage() {
 
       {/* 7. What the family can do, from the healthcare advisor agent */}
       {!!(plan?.focus_areas?.length || plan?.resources?.length) && (
-        <Card>
-          <h2 className="text-lg font-extrabold">What you can do this week</h2>
-          {plan.focus_areas?.map((f) => (
-            <div key={f.area} className="mt-3">
-              <p className="font-bold">{f.area}</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body">{(f.family_actions ?? []).map((x) => <li key={x}>{x}</li>)}</ul>
-            </div>
-          ))}
-          {!!plan.resources?.length && (
-            <ul className="mt-4 flex flex-col gap-2">
-              {plan.resources.map((r) => (
-                <li key={r.id} className="rounded-2xl bg-cream p-3">
-                  <p className="font-bold">
-                    {r.name} · {/^[\d ]+$/.test(r.contact)
-                      ? <a href={`tel:${r.contact.replace(/ /g, "")}`} className="text-brand underline underline-offset-4">{r.contact}</a>
-                      : <a href={`https://${r.contact}`} target="_blank" rel="noreferrer" className="text-brand underline underline-offset-4">{r.contact}</a>}
-                  </p>
-                  <p className="text-sm text-muted">{r.why}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        <ActionPlan plan={plan} gpName={circle.gp} canBook={alert?.severity === "review"} />
       )}
 
       {/* 8. The second patient: the carer */}
-      {(carer?.needsNudge || restDay) && (
+      {carer && (
         <section className="rounded-[22px] bg-rose-soft p-5 text-rose-deep">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-rose text-lg font-extrabold text-white">{helper[0]}</span>
@@ -297,11 +281,15 @@ export default async function FamilyPage() {
               </p>
             </>
           )}
-          <CarerActions helper={helper} restDay={restDay?.day ?? null} />
+          <CarerActions helper={helper} restDay={restDay?.day ?? null} helperLang={helperUser?.language ?? "id"} />
         </section>
       )}
 
-      {ai && <p className="px-1 text-sm text-faint">Summary written with AI from the numbers above.</p>}
+      {ai && (
+        <p className="px-1 text-sm text-faint">
+          {ai.source === "prepared" ? "Summary prepared from the numbers above." : "Summary written with AI from the numbers above."}
+        </p>
+      )}
       <div className="flex justify-center"><LogoutButton /></div>
     </Shell>
   );

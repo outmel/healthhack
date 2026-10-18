@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StatusIcon } from "@/components/Shell";
-import { Clock, Download } from "@/components/icons";
+import { Clock, Download, Phone, Stethoscope } from "@/components/icons";
+import { AreaCard } from "@/components/ActionPlan";
 import type { Analysis } from "@/lib/data";
 
 const BADGE: Record<Analysis["urgency"], { label: string; level: "normal" | "watch" | "urgent"; cls: string }> = {
@@ -24,10 +25,11 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
 
   async function run() {
     setState("busy");
-    const res = await fetch("/api/analyse", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(data.error ?? "Analysis failed");
+    const res = await fetch("/api/analyse", { method: "POST" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res?.ok) {
+      // Keep whatever summary is on screen; never replace it with an error code.
+      setError(result ? "Couldn't refresh, showing last summary." : `${data.error ?? "The AI service isn't available right now."} The trends below are up to date.`);
       return setState("error");
     }
     setResult(data);
@@ -47,11 +49,15 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
         <p className="flex items-center gap-2 font-extrabold">
           {badge ? <><StatusIcon level={badge.level} /> {badge.label}</> : "No AI summary yet"}
         </p>
-        {updated && <p className="text-sm font-semibold opacity-90">AI summary · updated {updated}</p>}
+        {updated && (
+          <p className="text-sm font-semibold opacity-90">
+            {result?.source === "prepared" ? `Prepared summary · ${updated}` : `AI summary · updated ${updated}`}
+          </p>
+        )}
       </div>
 
       <div className="p-5 text-[15px]">
-        {state === "error" && <p className="mb-3 text-coral">{error}</p>}
+        {state === "error" && <p role="status" className={`mb-3 font-semibold ${result ? "text-muted" : "text-coral"}`}>{error}</p>}
         {!a && state !== "busy" && <p className="text-muted">{readOnly ? "No AI summary yet. The trends are below." : "Run an analysis to get a GP-ready summary of the trends and notes."}</p>}
         {!a && lead && <LeadLine text={lead} />}
         {a && (
@@ -80,33 +86,50 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
               </div>
             )}
             {plan && !plan.parse_error && (
-              <div className="rounded-2xl border border-line p-4">
-                <p className="flex flex-wrap items-baseline justify-between gap-2 font-extrabold">
-                  Care plan
-                  {plan.escalation && <span className="text-sm font-semibold text-muted">See GP: {SEE_GP[plan.escalation.see_gp]}</span>}
-                </p>
-                {plan.focus_areas?.map((f) => (
-                  <div key={f.area} className="mt-3">
-                    <p className="font-bold">{f.area}</p>
-                    {f.why && <p className="text-sm text-muted">{f.why}</p>}
-                    {!!f.family_actions?.length && (
-                      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body">{f.family_actions.map((x) => <li key={x}>{x}</li>)}</ul>
-                    )}
-                  </div>
-                ))}
-                {!!plan.gp_checks?.length && (
+              <div className="space-y-3 border-t border-track pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-lg font-extrabold">Care plan</p>
+                  {plan.escalation && (
+                    <span className="rounded-full bg-sun-soft px-3 py-1 text-sm font-bold text-sun">See GP: {SEE_GP[plan.escalation.see_gp]}</span>
+                  )}
+                </div>
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+                  {!!plan.gp_checks?.length && (
+                    <div className="rounded-2xl border-2 border-brand/40 bg-paper p-4">
+                      <p className="flex items-center gap-2 font-extrabold text-brand-dark"><Stethoscope className="h-5 w-5" /> Clinical checks to consider</p>
+                      <ol className="mt-2 flex flex-col gap-2">
+                        {plan.gp_checks.map((q, i) => (
+                          <li key={q} className="flex gap-2.5 leading-snug text-body">
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-extrabold text-brand-dark">{i + 1}</span>
+                            {q}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  {!!plan.escalation?.call_995_if.length && (
+                    <div className="rounded-2xl bg-coral-soft p-4 text-coral">
+                      <p className="flex items-center gap-2 font-extrabold"><Phone className="h-5 w-5" /> Call 995 if</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 font-semibold">{plan.escalation.call_995_if.map((x) => <li key={x}>{x}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+                {!!plan.focus_areas?.length && (
                   <>
-                    <p className="mt-3 font-bold">Clinical checks to consider</p>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body">{plan.gp_checks.map((q) => <li key={q}>{q}</li>)}</ul>
+                    <p className="eyebrow pt-1 text-muted">What the family and helper are doing at home</p>
+                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+                      {plan.focus_areas.map((f) => (
+                        <AreaCard key={f.area} area={f} actions={[...(f.family_actions ?? []), ...(f.helper_actions ?? [])]} startLabel="First step at home" />
+                      ))}
+                    </div>
                   </>
-                )}
-                {!!plan.escalation?.call_995_if.length && (
-                  <p className="mt-3 text-sm font-semibold text-coral">Call 995 if: {plan.escalation.call_995_if.join("; ")}</p>
                 )}
               </div>
             )}
           </div>
         )}
+
+        {state === "busy" && <AnalysisProgress keeping={!!result} />}
 
         <div className="no-print mt-5 flex flex-wrap items-center gap-3">
           {!readOnly && (
@@ -122,7 +145,9 @@ export default function AnalysisPanel({ initial, lead, readOnly = false }: { ini
         </div>
         {a && (
           <p className="mt-4 text-xs text-faint">
-            Statistics are computed in code; the AI only explains them. Not a diagnosis.
+            {result?.source === "prepared"
+              ? "Prepared from the same statistics for the demo; press Re-analyse for a live AI run. Not a diagnosis."
+              : "Statistics are computed in code; the AI only explains them. Not a diagnosis."}
           </p>
         )}
       </div>
@@ -142,4 +167,44 @@ function LeadLine({ text }: { text: string }) {
 /** Make the figures in the summary easy to scan: bold numbers with their units. */
 function bold(text: string) {
   return text.split(/(\d+(?:\.\d+)?\s?(?:%|s\b|sec(?:onds)?\b|days?\b|SD\b)?)/g).map((p, i) => (i % 2 ? <strong key={i} className="text-ink">{p}</strong> : p));
+}
+
+// The n8n workflow's steps, with roughly when each starts (seconds). The run reports no progress,
+// so the bar is timed: it eases towards 95% and only fills when the result arrives.
+const STEPS: [number, string][] = [
+  [0, "Reading her last 4 weeks of data"],
+  [3, "Comparing with her own baseline"],
+  [6, "Trend analyser is explaining the changes"],
+  [30, "Healthcare advisor is writing the care plan"],
+  [55, "Checking safety rules and saving"],
+];
+
+function AnalysisProgress({ keeping }: { keeping: boolean }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => setSecs((Date.now() - start) / 1000), 250);
+    return () => clearInterval(id);
+  }, []);
+  const pct = Math.round(95 * (1 - Math.exp(-secs / 25)));
+  const step = STEPS.filter(([at]) => secs >= at).length;
+  return (
+    <div className="no-print mt-4 rounded-2xl bg-cream p-4" aria-live="polite">
+      <div className="flex items-baseline justify-between gap-3 text-[15px]">
+        <p className="font-bold">{STEPS[step - 1][1]}…</p>
+        <p className="shrink-0 tabular-nums text-sm text-muted">Step {step} of {STEPS.length} · {Math.floor(secs)} s</p>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="AI analysis progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        className="mt-2.5 h-2.5 overflow-hidden rounded-full bg-track"
+      >
+        <div className="h-full rounded-full bg-brand transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-2 text-sm text-muted">Usually under a minute.{keeping ? " The current summary stays until the new one is ready." : ""}</p>
+    </div>
+  );
 }
